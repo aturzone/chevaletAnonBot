@@ -1,0 +1,545 @@
+package bot
+
+import (
+	"strconv"
+	"strings"
+
+	"github.com/PaulSonOfLars/gotgbot/v2"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
+
+	"github.com/aturzone/chevaletAnonBot/internal/encoder"
+)
+
+// This file ports the callbacks from modules/start.py:
+// answer, seen, alread_seen, block, unblock, report, report_confirm_yes,
+// report_confirm_no, delete_msg_clbk, cancel, cancel_all, cancel_cmd, plus the
+// no_callback handler from modules/other_msgs.py.
+
+// answer ports start.answer: the "⌨️ ارسال جواب" button. It connects the user to
+// the original sender and enters the sending state (Python 0).
+func answer(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	clbk := ctx.CallbackQuery
+	if clbk == nil || clbk.Data == "" {
+		return nil
+	}
+	if _, err := clbk.Answer(tg, nil); err != nil {
+		return err
+	}
+	parts := strings.Split(clbk.Data, "|")
+	if len(parts) < 3 {
+		return nil
+	}
+	token, targetMid := parts[1], parts[2]
+	msg := ctx.EffectiveMessage
+
+	dbctx, cancel := b.bg()
+	defer cancel()
+
+	chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return handlers.EndConversation()
+	}
+
+	plain, _ := encoder.DecodeChevaletID(chid)
+	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, plain)
+	if err != nil {
+		return err
+	}
+	blocked, err := b.DB.IsBlocked(dbctx, targetUID, userid)
+	if err != nil {
+		return err
+	}
+	if blocked {
+		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtBlockedYou, ShowAlert: true})
+		return handlers.EndConversation()
+	}
+
+	ud := b.ud(ctx)
+	ud.d.targetChid = chid
+	ud.d.replyTo = targetMid
+
+	if _, err := msg.Reply(tg, txtAnswerPrompt, &gotgbot.SendMessageOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: *cancelMarkup(),
+	}); err != nil {
+		return err
+	}
+	return handlers.NextConversationState(stateSending)
+}
+
+// seen ports start.seen: tells the sender their message was seen, then swaps the
+// seen button to its "✅ seen done" form so it can't be triggered again.
+func seen(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	clbk := ctx.CallbackQuery
+	if clbk == nil || clbk.Data == "" {
+		return nil
+	}
+	parts := strings.Split(clbk.Data, "|")
+	if len(parts) < 3 {
+		return nil
+	}
+	token, targetMid := parts[1], parts[2]
+	msg := ctx.EffectiveMessage
+
+	dbctx, cancel := b.bg()
+	defer cancel()
+
+	chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return handlers.EndConversation()
+	}
+	plain, _ := encoder.DecodeChevaletID(chid)
+	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, plain)
+	if err != nil {
+		return err
+	}
+
+	blocked, err := b.DB.IsBlocked(dbctx, targetUID, userid)
+	if err != nil {
+		return err
+	}
+	if blocked {
+		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtBlockedYou, ShowAlert: true})
+		return handlers.EndConversation()
+	}
+
+	// send the "seen" notice to the target (handle_target_send wrapped).
+	tid, err := strconv.ParseInt(targetUID, 10, 64)
+	if err != nil {
+		return err
+	}
+	mid, _ := strconv.ParseInt(targetMid, 10, 64)
+	if _, serr := tg.SendMessage(tid, txtSeenSent, &gotgbot.SendMessageOpts{
+		ParseMode:       "HTML",
+		ReplyParameters: &gotgbot.ReplyParameters{MessageId: mid},
+	}); serr != nil {
+		// The Python seen_message ignored the del sentinel (the closure returned
+		// it but the caller never used it), so a handled error is effectively
+		// swallowed here too; an unhandled one propagates.
+		if _, perr := b.classifyTargetSendErr(ctx, msg.ExternalReply != nil, serr); perr != nil {
+			return perr
+		}
+	}
+
+	_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtToldThemSeen})
+
+	// rebuild the keyboard, swapping the seen button for SEEN_DONE.
+	if msg.ReplyMarkup != nil {
+		newKB := transformKeyboard(msg.ReplyMarkup.InlineKeyboard, func(btn gotgbot.InlineKeyboardButton) gotgbot.InlineKeyboardButton {
+			if strings.HasPrefix(btn.CallbackData, "seen") {
+				return cb(msgBtnSeenDone, "alread-seen")
+			}
+			return cb(btn.Text, btn.CallbackData)
+		})
+		_, _, _ = msg.EditReplyMarkup(tg, &gotgbot.EditMessageReplyMarkupOpts{
+			ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: newKB},
+		}) // errors ignored, like the Python try/except pass
+	}
+
+	return handlers.EndConversation()
+}
+
+// alreadySeen ports start.alread_seen: a no-op popup for the SEEN_DONE button.
+func alreadySeen(_ *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
+	if ctx.CallbackQuery != nil {
+		_, _ = ctx.CallbackQuery.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtAlreadySeenOnce})
+	}
+	return nil
+}
+
+// block ports start.block: the "🔒 بلاک" button.
+func block(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	clbk := ctx.CallbackQuery
+	if clbk == nil || clbk.Data == "" {
+		return nil
+	}
+	parts := strings.Split(clbk.Data, "|")
+	if len(parts) < 2 {
+		return nil
+	}
+	token := parts[1]
+	msg := ctx.EffectiveMessage
+
+	dbctx, cancel := b.bg()
+	defer cancel()
+
+	chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return handlers.EndConversation()
+	}
+	plain, _ := encoder.DecodeChevaletID(chid)
+	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, plain)
+	if err != nil {
+		return err
+	}
+
+	swap := func() {
+		if msg.ReplyMarkup == nil {
+			return
+		}
+		newKB := transformKeyboard(msg.ReplyMarkup.InlineKeyboard, func(btn gotgbot.InlineKeyboardButton) gotgbot.InlineKeyboardButton {
+			if strings.HasPrefix(btn.CallbackData, "block") {
+				return cb(msgBtnUnblock, strings.Replace(btn.CallbackData, "block", "unblock", 1))
+			}
+			return cb(btn.Text, btn.CallbackData)
+		})
+		_, _, _ = msg.EditReplyMarkup(tg, &gotgbot.EditMessageReplyMarkupOpts{
+			ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: newKB},
+		})
+	}
+
+	added, err := b.DB.AddBlock(dbctx, userid, targetUID)
+	if err != nil {
+		return err
+	}
+	if added {
+		swap()
+		if userid == targetUID {
+			_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtBlockSelf, ShowAlert: true})
+		} else {
+			_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtBlockSuccess, ShowAlert: true})
+		}
+	} else {
+		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtAlreadyBlocked, ShowAlert: true})
+		swap()
+	}
+	return nil
+}
+
+// unblock ports start.unblock: the "🔓 آنبلاک" button.
+func unblock(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	clbk := ctx.CallbackQuery
+	if clbk == nil || clbk.Data == "" {
+		return nil
+	}
+	parts := strings.Split(clbk.Data, "|")
+	if len(parts) < 2 {
+		return nil
+	}
+	token := parts[1]
+	msg := ctx.EffectiveMessage
+
+	dbctx, cancel := b.bg()
+	defer cancel()
+
+	chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return handlers.EndConversation()
+	}
+	plain, _ := encoder.DecodeChevaletID(chid)
+	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, plain)
+	if err != nil {
+		return err
+	}
+
+	swap := func() {
+		if msg.ReplyMarkup == nil {
+			return
+		}
+		newKB := transformKeyboard(msg.ReplyMarkup.InlineKeyboard, func(btn gotgbot.InlineKeyboardButton) gotgbot.InlineKeyboardButton {
+			if strings.HasPrefix(btn.CallbackData, "unblock") {
+				return cb(msgBtnBlock, strings.Replace(btn.CallbackData, "unblock", "block", 1))
+			}
+			return cb(btn.Text, btn.CallbackData)
+		})
+		_, _, _ = msg.EditReplyMarkup(tg, &gotgbot.EditMessageReplyMarkupOpts{
+			ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: newKB},
+		})
+	}
+
+	removed, err := b.DB.RemoveBlock(dbctx, userid, targetUID)
+	if err != nil {
+		return err
+	}
+	// The Python remove_block always returned True (dead "wasn't blocked" branch);
+	// RemoveBlock now reports the real affected-row count, so the "همین الانش بلاک
+	// نیس" popup can finally fire when nothing was removed.
+	if removed {
+		swap()
+		if userid == targetUID {
+			_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtUnblockSelf})
+		} else {
+			_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtUnblockSuccess})
+		}
+	} else {
+		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtNotBlockedNow})
+		swap()
+	}
+	return nil
+}
+
+// report ports start.report: shows the report confirmation prompt.
+func report(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
+	clbk := ctx.CallbackQuery
+	if clbk == nil || clbk.Data == "" {
+		return nil
+	}
+	if _, err := clbk.Answer(tg, nil); err != nil {
+		return err
+	}
+	parts := strings.Split(clbk.Data, "|")
+	if len(parts) < 3 {
+		return nil
+	}
+	token, targetMid := parts[1], parts[2]
+	msg := ctx.EffectiveMessage
+
+	dbctx, cancel := b.bg()
+	defer cancel()
+	_, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return handlers.EndConversation()
+	}
+
+	markup := gotgbot.InlineKeyboardMarkup{InlineKeyboard: [][]gotgbot.InlineKeyboardButton{{
+		cb(btnReportYes, "report_yes|"+token+"|"+targetMid),
+		cb(btnReportNo, "report_no"),
+	}}}
+	_, err = msg.Reply(tg, txtReportConfirm, &gotgbot.SendMessageOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: markup,
+	})
+	return err
+}
+
+// reportConfirmYes ports start.report_confirm_yes: forwards the reported message
+// to the report channel and acknowledges to the reporter.
+func reportConfirmYes(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	clbk := ctx.CallbackQuery
+	if clbk == nil || clbk.Data == "" {
+		return nil
+	}
+	if _, err := clbk.Answer(tg, nil); err != nil {
+		return err
+	}
+	parts := strings.Split(clbk.Data, "|")
+	if len(parts) < 3 {
+		return nil
+	}
+	token, targetMid := parts[1], parts[2]
+	msg := ctx.EffectiveMessage
+
+	dbctx, cancel := b.bg()
+	defer cancel()
+	chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return handlers.EndConversation()
+	}
+	plain, _ := encoder.DecodeChevaletID(chid)
+	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, plain)
+	if err != nil {
+		return err
+	}
+
+	// delete the confirmation message
+	_, _ = msg.Delete(tg, nil)
+
+	reportChatID, perr := strconv.ParseInt(b.Cfg.ReportChatID, 10, 64)
+	if perr != nil {
+		return perr
+	}
+	targetID, perr := strconv.ParseInt(targetUID, 10, 64)
+	if perr != nil {
+		return perr
+	}
+	userID64, perr := strconv.ParseInt(userid, 10, 64)
+	if perr != nil {
+		return perr
+	}
+
+	// report id: an opaque short token shown to the reporter (shortuuid.uuid()).
+	reportID := encoder.GenerateCID(20)
+
+	header := "id: <code>" + reportID + "</code>\n" +
+		"reporter: " + b.getLinkUsername(userid) + "\n" +
+		"reported: " + b.getLinkUsername(targetUID) + "\n" +
+		"\n----------------\n❇️ COPY: <code>" + targetUID + "</code>\n------------\n" +
+		"message:"
+	firstMessage, err := tg.SendMessage(reportChatID, header, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+	if err != nil {
+		return err
+	}
+
+	targetMid64, _ := strconv.ParseInt(targetMid, 10, 64)
+	if _, cerr := tg.CopyMessage(reportChatID, targetID, targetMid64, &gotgbot.CopyMessageOpts{
+		ReplyParameters: &gotgbot.ReplyParameters{MessageId: firstMessage.MessageId, AllowSendingWithoutReply: true},
+	}); cerr != nil {
+		// Fall back to forwarding the message from the reporter's own chat.
+		var srcMid int64 = msg.MessageId
+		if msg.ReplyToMessage != nil {
+			srcMid = msg.ReplyToMessage.MessageId
+		}
+		if originalMsg, ferr := tg.ForwardMessage(reportChatID, userID64, srcMid, nil); ferr == nil {
+			_, _ = tg.SendMessage(reportChatID, txtReportedFromTargetChat, &gotgbot.SendMessageOpts{
+				ReplyParameters: &gotgbot.ReplyParameters{MessageId: originalMsg.MessageId},
+			})
+		}
+	}
+
+	_, err = tg.SendMessage(userID64, "ریپورت شد.\nکد پیگیری: <code>"+reportID+"</code>",
+		&gotgbot.SendMessageOpts{ParseMode: "HTML"})
+	if err != nil {
+		return err
+	}
+	return handlers.EndConversation()
+}
+
+// reportConfirmNo ports start.report_confirm_no: cancels the report.
+func reportConfirmNo(_ *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
+	clbk := ctx.CallbackQuery
+	if clbk == nil || clbk.Data == "" {
+		return nil
+	}
+	_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtReportCancelled})
+	_, _ = ctx.EffectiveMessage.Delete(tg, nil)
+	return handlers.EndConversation()
+}
+
+// deleteMsgClbk ports start.delete_msg_clbk: deletes the message(s) the warning's
+// "delete" button references from the target's chat, then tidies up.
+func deleteMsgClbk(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
+	clbk := ctx.CallbackQuery
+	if clbk == nil || clbk.Data == "" {
+		return nil
+	}
+	parts := strings.Split(clbk.Data, "|")
+	if len(parts) < 2 {
+		return nil
+	}
+	token := parts[1]
+	msg := ctx.EffectiveMessage
+
+	dbctx, cancel := b.bg()
+	defer cancel()
+	chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return handlers.EndConversation()
+	}
+	plain, _ := encoder.DecodeChevaletID(chid)
+	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, plain)
+	if err != nil {
+		return err
+	}
+	if targetUID == "" {
+		// Python asserted target_uid; a missing one is an unexpected state.
+		return handlers.EndConversation()
+	}
+	targetID, perr := strconv.ParseInt(targetUID, 10, 64)
+	if perr != nil {
+		return perr
+	}
+
+	// collect the message ids from EVERY button (callback_data split, fields 2+).
+	seen := map[string]struct{}{}
+	if msg.ReplyMarkup != nil {
+		for _, row := range msg.ReplyMarkup.InlineKeyboard {
+			for _, btn := range row {
+				flds := strings.Split(btn.CallbackData, "|")
+				if len(flds) > 2 {
+					for _, m := range flds[2:] {
+						seen[m] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	for m := range seen {
+		if mid, e := strconv.ParseInt(m, 10, 64); e == nil {
+			_, _ = tg.DeleteMessage(targetID, mid, nil) // "None" and bad ids fail silently
+		}
+	}
+
+	// delete the warning message itself
+	_, _ = msg.Delete(tg, nil)
+
+	// confirm to the user, quoting their original message
+	if msg.ReplyToMessage != nil {
+		_, _ = msg.Reply(tg, txtDeletedForThem, &gotgbot.SendMessageOpts{
+			ReplyParameters: &gotgbot.ReplyParameters{
+				MessageId:                msg.ReplyToMessage.MessageId,
+				AllowSendingWithoutReply: true,
+			},
+		})
+	}
+	return handlers.EndConversation()
+}
+
+// cancel ports start.cancel: the CANCEL_BUTTON. Edits the prompt away and
+// schedules its deletion.
+func cancel(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
+	ud := b.ud(ctx)
+	ud.clear()
+	msg := ctx.EffectiveMessage
+	if _, _, err := msg.EditText(tg, txtCancelGone, nil); err != nil {
+		// matches Python which did not guard edit_text; a benign error is
+		// swallowed by classifyErr.
+		return err
+	}
+	b.scheduleDeleteMessage(msg)
+	return handlers.EndConversation()
+}
+
+// cancelAll ports start.cancel_all: the conversation fallback for any stray
+// message while composing.
+func cancelAll(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, _ string) error {
+	b.ud(ctx).clear()
+	if err := b.replyText(ctx, txtCancelledMidSend); err != nil {
+		return err
+	}
+	return handlers.EndConversation()
+}
+
+// cancelCmd ports start.cancel_cmd: the /cancel fallback inside the conversation.
+func cancelCmd(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, _ string) error {
+	b.ud(ctx).clear()
+	if err := b.replyText(ctx, txtCancelledAll); err != nil {
+		return err
+	}
+	return handlers.EndConversation()
+}
+
+// noCallback ports other_msgs.no_callback: answers the spacer / "sent with link"
+// buttons with nothing.
+func noCallback(_ *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
+	if ctx.CallbackQuery != nil {
+		_, _ = ctx.CallbackQuery.Answer(tg, nil)
+	}
+	return nil
+}
+
+// transformKeyboard rebuilds an inline keyboard, applying fn to every button.
+// Used by seen/block/unblock to swap a single button in place while preserving
+// the rest, mirroring the Python list comprehensions.
+func transformKeyboard(kb [][]gotgbot.InlineKeyboardButton, fn func(gotgbot.InlineKeyboardButton) gotgbot.InlineKeyboardButton) [][]gotgbot.InlineKeyboardButton {
+	out := make([][]gotgbot.InlineKeyboardButton, 0, len(kb))
+	for _, row := range kb {
+		newRow := make([]gotgbot.InlineKeyboardButton, 0, len(row))
+		for _, btn := range row {
+			newRow = append(newRow, fn(btn))
+		}
+		out = append(out, newRow)
+	}
+	return out
+}

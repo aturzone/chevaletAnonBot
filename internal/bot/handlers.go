@@ -5,18 +5,101 @@ import (
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/conversation"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters"
+	cqfilters "github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/callbackquery"
+	msgfilters "github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/message"
 )
 
-// registerHandlers wires the dispatcher. Phase 2 covers the self-contained
-// text commands; Phase 3+ adds /start (+conversation), settings, my_links,
-// admin, the reply/seen/block/report/delete callbacks, media groups, AI chat
-// and the background jobs.
+// registerHandlers wires the dispatcher in the same group-0 order as the Python
+// main.py handler list, so exactly one handler processes each update and
+// precedence matches the original (the conversation outranks the media-group and
+// catch-all handlers; the catch-all is last).
+//
+// Phase 3 adds: no-callback, the /start conversation (start/answer/seen/block/
+// unblock/report/delete callbacks + the state-0 send_msg + fallbacks), the
+// media-group handler and the top-level delete handler, plus the other_messages
+// catch-all. Phases 4/5 (settings, my_links, admin, AI, jobs) come later.
 func (b *Bot) registerHandlers() {
+	d := b.Dispatcher
+
+	// no_callback_handler — answers the spacer / "sent with link" buttons.
+	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("no-callback"), b.topLevel(noCallback)))
+
+	// start_cmd_handler — the per-user conversation.
+	d.AddHandler(b.startConversation())
+
+	// media_group_handler — subsequent media of a group.
+	d.AddHandler(handlers.NewMessage(msgfilters.MediaGroup, b.topLevel(handleMedia)))
+
+	// delete_message_handler — the warning's "delete" button, standalone.
+	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("delete|"), b.topLevel(deleteMsgClbk)))
+
+	// Phase 2 self-contained commands.
 	b.command("help", cmdHelp)
 	b.command("privacy", cmdPrivacy)
 	b.command("donate", cmdDonate)
 	b.command("myuid", cmdMyUID)
 	b.command("bug", cmdBug)
+
+	// other_messages_handler — the catch-all, registered LAST so the conversation
+	// and media handlers take precedence. The Python `& ~IsDirectMessageFilter`
+	// (exclude business "direct messages" chats) is unnecessary here because prep
+	// already restricts handling to private chats.
+	d.AddHandler(handlers.NewMessage(msgfilters.All, b.topLevel(otherMessages)))
+}
+
+// startConversation builds the ConversationHandler ported from start.py
+// (start_cmd_handler): per-user, entry points + state "0" (composing) +
+// fallbacks. Entry points and state-0 share the same callback set; state 0 adds
+// the send_msg message handler.
+func (b *Bot) startConversation() handlers.Conversation {
+	callbacks := func() []ext.Handler {
+		return []ext.Handler{
+			handlers.NewCommand("start", b.prep(startCmd)),
+			handlers.NewCallback(cqfilters.Prefix("answer|"), b.prep(answer)),
+			handlers.NewCallback(cqfilters.Prefix("seen|"), b.prep(seen)),
+			handlers.NewCallback(cqContains("alread-seen"), b.prep(alreadySeen)),
+			handlers.NewCallback(cqfilters.Prefix("report|"), b.prep(report)),
+			handlers.NewCallback(cqfilters.Prefix("report_yes|"), b.prep(reportConfirmYes)),
+			handlers.NewCallback(cqfilters.Prefix("report_no"), b.prep(reportConfirmNo)),
+			handlers.NewCallback(cqfilters.Prefix("block|"), b.prep(block)),
+			handlers.NewCallback(cqfilters.Prefix("unblock|"), b.prep(unblock)),
+		}
+	}
+
+	entryPoints := callbacks()
+	state0 := append(callbacks(),
+		handlers.NewMessage(notCommand, b.prep(sendMsg)),
+	)
+
+	return handlers.NewConversation(
+		entryPoints,
+		map[string][]ext.Handler{stateSending: state0},
+		&handlers.ConversationOpts{
+			Fallbacks: []ext.Handler{
+				handlers.NewCallback(cqfilters.Prefix("delete|"), b.prep(deleteMsgClbk)),
+				handlers.NewCallback(cqContains("cancel"), b.prep(cancel)),
+				handlers.NewCommand("cancel", b.prep(cancelCmd)),
+				handlers.NewMessage(msgfilters.All, b.prep(cancelAll)),
+			},
+			StateStorage: conversation.NewInMemoryStorage(conversation.KeyStrategySender),
+		},
+	)
+}
+
+// notCommand mirrors PTB's `filters.ALL & ~filters.COMMAND` for the state-0
+// send_msg handler: any message that is not a bot command.
+func notCommand(m *gotgbot.Message) bool { return !msgfilters.Command(m) }
+
+// cqContains builds a callback-query filter matching data that CONTAINS sub,
+// reproducing the Python CallbackQueryHandler patterns that used an unanchored
+// regex (e.g. r"cancel", r"alread-seen").
+func cqContains(sub string) filters.CallbackQuery {
+	return func(cq *gotgbot.CallbackQuery) bool {
+		return strings.Contains(cq.Data, sub)
+	}
 }
 
 // replyHTML replies to the triggering message in HTML, optionally disabling the

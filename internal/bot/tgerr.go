@@ -45,3 +45,11 @@ func errMessageIDInvalid(err error) bool { return descContains(err, "MESSAGE_ID_
 
 // errQueryTooOld: "Bad Request: query is too old and response timeout expired …".
 func errQueryTooOld(err error) bool { return descContains(err, "query is too old") }
+
+// errForbidden matches any HTTP 403 "Forbidden: …" Telegram error, mirroring the
+// PTB `except Forbidden` in is_reply_to_channel (e.g. a private channel the bot
+// was never added to).
+func errForbidden(err error) bool {
+	te := asTelegramError(err)
+	return te != nil && te.Code == 403
+}

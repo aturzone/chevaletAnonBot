@@ -1,6 +1,10 @@
 package bot
 
-import "github.com/PaulSonOfLars/gotgbot/v2"
+import (
+	"strconv"
+
+	"github.com/PaulSonOfLars/gotgbot/v2"
+)
 
 // This file ports modules/Global/reply_markups.py verbatim. The callback_data
 // strings are reproduced exactly because the handlers match on them.
@@ -28,6 +32,49 @@ func urlBtn(text, url string) gotgbot.InlineKeyboardButton {
 
 // cancelButton mirrors reply_markups.CANCEL_BUTTON.
 func cancelButton() gotgbot.InlineKeyboardButton { return cb("بیخیالش", "cancel") }
+
+// cancelMarkup is the single-row [CANCEL_BUTTON] keyboard used by /start connect
+// and the answer prompt.
+func cancelMarkup() *gotgbot.InlineKeyboardMarkup {
+	return &gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{{cancelButton()}},
+	}
+}
+
+// messageKeyboard builds the inline keyboard placed under every delivered
+// anonymous message, mirroring the first two rows of reply_markup_keyboard in
+// handler_templates.send_msg_template. senderEncChid is the already-encoded
+// chevaletid of the sender; mid is the sender's message id. When seen is true
+// the "mark as seen" button is inserted at the front of the first row, exactly
+// as the Python `reply_markup_keyboard[0].insert(0, ...)`.
+//
+// The caller appends the optional "sent with link N (cid)" row and the donation
+// row, matching the order the Python code assembles them.
+func messageKeyboard(senderEncChid string, mid int64, seen bool) [][]gotgbot.InlineKeyboardButton {
+	midStr := strconv.FormatInt(mid, 10)
+	firstRow := []gotgbot.InlineKeyboardButton{
+		cb(msgBtnReply, "answer|"+senderEncChid+"|"+midStr),
+	}
+	if seen {
+		firstRow = append([]gotgbot.InlineKeyboardButton{
+			cb(msgBtnSeen, "seen|"+senderEncChid+"|"+midStr),
+		}, firstRow...)
+	}
+	return [][]gotgbot.InlineKeyboardButton{
+		firstRow,
+		{
+			cb(msgBtnReport, "report|"+senderEncChid+"|"+midStr),
+			cb(" ", "no-callback"),
+			cb(msgBtnBlock, "block|"+senderEncChid),
+		},
+	}
+}
+
+// donationRow mirrors the trailing donation-link button row appended to every
+// delivered message's keyboard.
+func donationRow(donationLink string) []gotgbot.InlineKeyboardButton {
+	return []gotgbot.InlineKeyboardButton{urlBtn(btnDonation, donationLink)}
+}
 
 // settingsMainMenu mirrors SETTINGS_MARKUP["main-menu-set"].
 func settingsMainMenu() [][]gotgbot.InlineKeyboardButton {
@@ -68,7 +115,7 @@ func mylinksDefaultMenu() [][]gotgbot.InlineKeyboardButton {
 
 // mylinksButtons mirrors the single-button entries of MYLINKS_MARKUP.
 var mylinksButtons = map[string]gotgbot.InlineKeyboardButton{
-	"back-to-menu":     cb("↪️ برگشت به منوی اصلی", "mylinks-menu"),
-	"what-is-cid":      cb("❔آیدی لینک چیه", "what-is-cid|"),
+	"back-to-menu":      cb("↪️ برگشت به منوی اصلی", "mylinks-menu"),
+	"what-is-cid":       cb("❔آیدی لینک چیه", "what-is-cid|"),
 	"what-is-customize": cb("❔شخصی سازی لینک چیه", "what-is-cid|"),
 }

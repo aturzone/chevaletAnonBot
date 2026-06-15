@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"strconv"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
@@ -13,6 +14,11 @@ import (
 // the usual gotgbot arguments, mirroring the Python signature
 // (update, context, message, userid, bot, dbh) — here `b` carries the db handle
 // and config, so dbh/bot are reachable through it.
+//
+// The returned error is either a genuine error (routed to the central error
+// hook) OR a conversation state change produced by handlers.NextConversationState
+// / handlers.EndConversation. prep passes both kinds straight through; only the
+// enclosing ConversationHandler interprets the latter (see registerHandlers).
 type Handler func(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 
 // prep wraps a Handler with the middleware from modules/Global/decorators.py
@@ -36,6 +42,13 @@ func (b *Bot) prep(fn Handler) handlers.Response {
 
 		userid := strconv.FormatInt(ctx.EffectiveUser.Id, 10)
 
+		// Serialise this user's updates (mirrors PTB's effectively per-user
+		// processing and keeps media-group state race-free). Released when the
+		// handler returns.
+		ud := b.users.get(ctx.EffectiveUser.Id)
+		ud.mu.Lock()
+		defer ud.mu.Unlock()
+
 		dbctx, cancel := context.WithTimeout(context.Background(), dbOpTimeout)
 		defer cancel()
 
@@ -43,19 +56,76 @@ func (b *Bot) prep(fn Handler) handlers.Response {
 			return err
 		}
 
+		if err := b.initUser(dbctx, userid, ctx.EffectiveUser); err != nil {
+			return b.classifyErr(err)
+		}
+
 		banned, err := b.DB.IsBanned(dbctx, userid)
 		if err != nil {
-			return err
+			return b.classifyErr(err)
 		}
 		if banned {
 			return nil // banned users are silently ignored, as in the original
 		}
 
-		return fn(b, tg, ctx, userid)
+		return b.classifyErr(fn(b, tg, ctx, userid))
 	}
 }
 
-// command registers a private-chat command handler wrapped with prep.
-func (b *Bot) command(name string, fn Handler) {
-	b.Dispatcher.AddHandler(handlers.NewCommand(name, b.prep(fn)))
+// classifyErr mirrors the except blocks of @prep_function, which wrapped every
+// handler: it swallows the benign Telegram errors PTB ignored (an old callback
+// query, a vanished reply target, or a Forbidden from a user who blocked the
+// bot) and lets conversation state changes through untouched. Everything else
+// propagates to the central error hook (onError), which — like the global PTB
+// error_handler — notifies ERROR_CHAT_ID and replies a tracking code. (The
+// Python prep had bespoke replies for DB/network errors; those are folded into
+// onError here, since pgxpool auto-reconnects make them rare.)
+func (b *Bot) classifyErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var sc *handlers.ConversationStateChange
+	if errors.As(err, &sc) {
+		return err
+	}
+	switch {
+	case errQueryTooOld(err):
+		return nil
+	case errReplyNotFound(err):
+		return nil
+	case errForbidden(err): // covers "bot was blocked by the user" / "not a member"
+		return nil
+	default:
+		return err
+	}
 }
+
+// command registers a private-chat command handler wrapped with prep. Used for
+// the self-contained Phase 2 commands; conversation entry points use the
+// builders below instead so their state changes are honoured.
+func (b *Bot) command(name string, fn Handler) {
+	b.Dispatcher.AddHandler(handlers.NewCommand(name, b.topLevel(fn)))
+}
+
+// topLevel adapts a Handler for registration OUTSIDE a ConversationHandler. Some
+// handlers (e.g. delete_msg_clbk) are reused both inside the conversation —
+// where their handlers.EndConversation()/NextConversationState return values
+// matter — and standalone, where PTB simply ignored that return. A conversation
+// state change leaking to the dispatcher would be mistaken for a real error, so
+// we swallow it here, exactly reproducing PTB's "return value ignored outside a
+// conversation" semantics.
+func (b *Bot) topLevel(fn Handler) handlers.Response {
+	inner := b.prep(fn)
+	return func(tg *gotgbot.Bot, ctx *ext.Context) error {
+		err := inner(tg, ctx)
+		var sc *handlers.ConversationStateChange
+		if errors.As(err, &sc) {
+			return nil
+		}
+		return err
+	}
+}
+
+// Conversation state names. The Python ConversationHandler used the integer
+// state 0 for "currently composing a message to a target"; we keep that label.
+const stateSending = "0"

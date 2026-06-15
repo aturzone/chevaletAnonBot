@@ -34,6 +34,7 @@ type Bot struct {
 	Cfg   *config.Config
 	Texts *texts.Loader
 
+	users  *userStore
 	admins map[string]bool
 }
 
@@ -65,6 +66,7 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 		DB:     database,
 		Cfg:    cfg,
 		Texts:  txt,
+		users:  newUserStore(),
 		admins: make(map[string]bool, len(cfg.Admins)),
 	}
 	for _, a := range cfg.Admins {

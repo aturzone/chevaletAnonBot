@@ -81,12 +81,23 @@ Static assets reused verbatim: `Texts/`, `dynamic_settings.json`, `.env`,
   central error hook (notifies `ERROR_CHAT_ID`), `internal/texts` loader, health
   + graceful shutdown wired in `main`. Vertical slice: `/help`, `/privacy`,
   `/donate` work end-to-end. ⏳ runtime-verify needs a token + Postgres.
-- [~] **3. Core messaging** — *foundations done & pushed:* `markup.go`
-  (reply_markups verbatim), `getuser.go`, `tgerr.go` (gotgbot error
-  predicates). *In progress (the intricate ~600 lines):* `send_msg_template`,
-  `/start [cid|UNBLOCK-uid]`, the reply/seen/block/report/delete callbacks,
-  media groups, reply-to-channel, tags (custom/audio), warning + auto-delete,
-  and the gotgbot ConversationHandler wiring (state 0 = sending, per-user).
+- [x] **3. Core messaging** — *foundations:* `markup.go` (reply_markups +
+  message keyboard builder), `getuser.go`, `tgerr.go`. *Core (done):*
+  `sendmsg.go` (`send_msg_template`: copy-to-target, wpp-preview removal,
+  multi-link button, notify message, custom/audio/reply tags, warning +
+  `time.AfterFunc` auto-delete), `autoreply.go` (`is_answer`,
+  `is_reply_to_channel` incl. author-signature links + external_reply/quotes,
+  `check_if_autoreply`), `start.go` (`/start`, `/start <cid>`,
+  `/start UNBLOCK-<uid>`), `callbacks.go` (answer/seen/already-seen/block/
+  unblock/report/report_confirm/delete/cancel/no-callback), `media.go`
+  (`handle_media` media groups), `othermsgs.go`, `targetsend.go`
+  (`handle_target_send` del+0/del+e sentinels), `jobs.go`, `cidchid.go`
+  (`handle_cid_or_chid`), `userdata.go` (per-user `context.user_data` store,
+  locked per-update in `prep`). The gotgbot `ConversationHandler` is wired in
+  `handlers.go` (per-user `KeyStrategySender`, entry points + state `0` +
+  fallbacks) in the same group-0 order as the Python `main.py`. `prep` now also
+  mirrors `@prep_function`'s error filtering (swallow query-too-old /
+  reply-not-found / Forbidden). ⏳ runtime-verify needs a token + Postgres.
 - [ ] **4. Settings & links** — settings conversation (name, tags, wpp, seen,
   warning), `my_links` (add/remove/rename cid with limits), privacy/help/donate/
   myuid/bug.
