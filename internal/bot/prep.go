@@ -53,10 +53,6 @@ func (b *Bot) prep(fn Handler) handlers.Response {
 		defer cancel()
 
 		if err := b.initUser(dbctx, userid, ctx.EffectiveUser); err != nil {
-			return err
-		}
-
-		if err := b.initUser(dbctx, userid, ctx.EffectiveUser); err != nil {
 			return b.classifyErr(err)
 		}
 

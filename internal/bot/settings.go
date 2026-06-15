@@ -3,6 +3,8 @@ package bot
 import (
 	"context"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
@@ -124,7 +126,7 @@ func (b *Bot) settingsToggle(tg *gotgbot.Bot, ctx *ext.Context, userid string, s
 
 	// data is "<key>|" or "<key>|activate"/"<key>|deactivate".
 	activation := ""
-	if i := indexByteFrom(clbk.Data, '|'); i >= 0 {
+	if i := strings.IndexByte(clbk.Data, '|'); i >= 0 {
 		activation = clbk.Data[i+1:]
 	}
 	switch activation {
@@ -357,7 +359,7 @@ func unblockAll(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error 
 	}
 	_, _ = clbk.Answer(tg, nil)
 	activation := ""
-	if i := indexByteFrom(clbk.Data, '|'); i >= 0 {
+	if i := strings.IndexByte(clbk.Data, '|'); i >= 0 {
 		activation = clbk.Data[i+1:]
 	}
 	if activation != "" {
@@ -438,15 +440,5 @@ func (b *Bot) deleteOgMID(tg *gotgbot.Bot, ctx *ext.Context, _ string) {
 	}
 }
 
-// indexByteFrom returns the index of the first occurrence of c in s, or -1.
-func indexByteFrom(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
-}
-
 // runeLen counts code points, matching Python's len(str).
-func runeLen(s string) int { return len([]rune(s)) }
+func runeLen(s string) int { return utf8.RuneCountInString(s) }
