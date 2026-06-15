@@ -81,13 +81,13 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 // never panic — mirroring the Python decode returning False.
 func TestDecodeInvalid(t *testing.T) {
 	invalid := []string{
-		"",            // empty
-		"abc",         // no key-patch digits
-		"123",         // all digits, no patch letter
-		"a",           // single letter, no digits
-		"abc-",        // trailing non-digit, empty key-patch
-		"ab1",         // key = 1 - ord('b') < 0
-		"zzz0",        // key = 0 - ord('z') < 0
+		"",                  // empty
+		"abc",               // no key-patch digits
+		"123",               // all digits, no patch letter
+		"a",                 // single letter, no digits
+		"abc-",              // trailing non-digit, empty key-patch
+		"ab1",               // key = 1 - ord('b') < 0
+		"zzz0",              // key = 0 - ord('z') < 0
 		"aaaa2147483648900", // overflow-ish digit run -> reject
 	}
 	for _, in := range invalid {

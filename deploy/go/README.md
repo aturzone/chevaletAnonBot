@@ -28,8 +28,24 @@ proxy, so a working `PROXY` is required.
    The bot runs `CREATE TABLE IF NOT EXISTS` on the fresh DB, connects through
    the proxy, and starts long polling.
 
-4. In Telegram, message the staging bot and try the commands ported so far:
-   `/help`, `/privacy`, `/donate`, `/myuid`, `/bug`.
+4. In Telegram, message the staging bot. The full bot is ported, so you can
+   exercise everything end-to-end:
+   - **Commands:** `/help`, `/privacy`, `/donate`, `/myuid`, `/bug`,
+     `/settings`, `/my_links`, `/cancel`, and `/admin help` (from an `ADMINS`
+     uid).
+   - **Sending:** open the bot via one of your `/my_links` links
+     (`t.me/<bot>?start=<cid>`) in a second account and send a message; check
+     the **reply / seen / block / report** buttons on the delivered message,
+     the "sent with link N" indicator, and the deletion warning + its delete
+     button.
+   - **Replies:** use the **⌨️ ارسال جواب** button, then also just *reply* to a
+     delivered message (auto-reply); reply to a channel post whose bio/pin holds
+     a `?start=` link (reply-to-channel).
+   - **Settings:** change name, custom/audio tags, toggle wpp / seen / warning,
+     unblock-me / unblock-all.
+   - **my_links:** add / remove / rename a link (limit + uniqueness checks).
+   - **Media groups** (album), **quotes**, and (if `GM_GROUP_ID` is set + an
+     `AI_URL` reachable) the **AI reply** in the GM group.
 
    Each first message also exercises the `prep` middleware + `init_user` (the
    user row, a cid and a chevaletid are created in the test DB).

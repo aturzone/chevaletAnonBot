@@ -20,9 +20,9 @@ import (
 // Hard-coded constants mirroring the tail of config.py.
 const (
 	MaxTryAddCID            = 5
-	DeletionTimeout        = 10
+	DeletionTimeout         = 10
 	DeletionTimeoutExtended = DeletionTimeout + 5
-	DefaultAudioTag        = "[ناشناس]"
+	DefaultAudioTag         = "[ناشناس]"
 	// AllowedCIDChars must NEVER contain '|'. Kept here for parity with config.py;
 	// the cipher itself uses the copy inside the encoder package.
 	AllowedCIDChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
