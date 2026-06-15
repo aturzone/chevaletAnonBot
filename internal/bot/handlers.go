@@ -15,6 +15,8 @@ func (b *Bot) registerHandlers() {
 	b.command("help", cmdHelp)
 	b.command("privacy", cmdPrivacy)
 	b.command("donate", cmdDonate)
+	b.command("myuid", cmdMyUID)
+	b.command("bug", cmdBug)
 }
 
 // replyHTML replies to the triggering message in HTML, optionally disabling the
@@ -55,4 +57,27 @@ func cmdDonate(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, _ string) error {
 	}
 	txt = strings.ReplaceAll(txt, "%s", b.Cfg.DonationLink)
 	return b.replyHTML(ctx, txt, true)
+}
+
+// cmdMyUID mirrors myuid.myuid_cmd: replies with the user's Telegram id.
+func cmdMyUID(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	_, err := ctx.EffectiveMessage.Reply(b.TG, userid, nil)
+	return err
+}
+
+// cmdBug mirrors warn_bug.warn_bug_reply_to_channel: the channel-reply warning,
+// with a small-media link preview pointing at the relevant Telegram bug.
+func cmdBug(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, _ string) error {
+	txt, err := b.Texts.Get("warn_reply_to_channel")
+	if err != nil {
+		return err
+	}
+	_, err = ctx.EffectiveMessage.Reply(b.TG, txt, &gotgbot.SendMessageOpts{
+		ParseMode: "HTML",
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{
+			Url:              "https://bugs.telegram.org/c/47222",
+			PreferSmallMedia: true,
+		},
+	})
+	return err
 }
