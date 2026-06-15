@@ -29,6 +29,12 @@ func (db *DB) GetAllCIDs(ctx context.Context) ([]string, error) {
 	return db.queryStrings(ctx, `SELECT cid FROM cids`)
 }
 
+// GetUIDByCID returns the uid that owns a cid, or "" when the cid is unknown.
+// Mirrors DBHandler.get_uid_by_cid (which returned None for a missing cid).
+func (db *DB) GetUIDByCID(ctx context.Context, cid string) (string, error) {
+	return db.queryOptString(ctx, `SELECT uid FROM cids WHERE cid=$1`, cid)
+}
+
 // AddCID inserts a cid for a user, regenerating on the (astronomically rare)
 // unique collision up to config.MaxTryAddCID times. Returns false if every
 // attempt collided.

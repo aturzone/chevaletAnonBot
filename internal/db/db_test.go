@@ -225,6 +225,18 @@ func TestCIDs(t *testing.T) {
 		t.Fatalf("GetCIDs = %v; want [cidA cidB] in insertion order", cids)
 	}
 
+	// GetUIDByCID resolves an owner, and returns "" for an unknown cid.
+	uid, err := d.GetUIDByCID(ctx, "cidA")
+	noErr(t, err, "GetUIDByCID cidA")
+	if uid != "u1" {
+		t.Fatalf("GetUIDByCID cidA = %q; want u1", uid)
+	}
+	uid, err = d.GetUIDByCID(ctx, "nope")
+	noErr(t, err, "GetUIDByCID nope")
+	if uid != "" {
+		t.Fatalf("GetUIDByCID nope = %q; want empty", uid)
+	}
+
 	noErr(t, d.SetCID(ctx, "cidA2", "cidA"), "SetCID")
 	cids, err = d.GetCIDs(ctx, "u1")
 	noErr(t, err, "GetCIDs after rename")
