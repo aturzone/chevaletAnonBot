@@ -17,10 +17,19 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/aturzone/chevaletAnonBot/internal/config"
 )
+
+// IsUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505). It lets handlers reproduce the Python
+// `except IntegrityError` paths (e.g. a cid rename racing another user).
+func IsUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
 
 // DB owns the connection pool and the per-install defaults that the Python
 // schema baked into its DDL / inserts.

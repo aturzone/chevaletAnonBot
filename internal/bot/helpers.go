@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"strings"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
@@ -43,6 +44,24 @@ func htmlOpts(markup *gotgbot.InlineKeyboardMarkup) *gotgbot.SendMessageOpts {
 		o.ReplyMarkup = *markup
 	}
 	return o
+}
+
+// sendPlain sends a plain-text message to the user's chat WITHOUT quoting the
+// triggering message (Python message.reply_text(...) with no reply_parameters).
+func (b *Bot) sendPlain(ctx *ext.Context, text string) error {
+	_, err := b.TG.SendMessage(ctx.EffectiveChat.Id, text, nil)
+	return err
+}
+
+// fmtText substitutes each "%s" in text with the next arg, in order, inserting
+// the replacement literally. This mirrors Python's `text % (a, b, ...)` for the
+// Texts/* templates (which only use %s) while being safe against stray '%' in
+// the template or the substituted values.
+func fmtText(text string, args ...string) string {
+	for _, a := range args {
+		text = strings.Replace(text, "%s", a, 1)
+	}
+	return text
 }
 
 // indexOf returns the position of v in s, or -1. Mirrors Python's list.index

@@ -98,9 +98,14 @@ Static assets reused verbatim: `Texts/`, `dynamic_settings.json`, `.env`,
   fallbacks) in the same group-0 order as the Python `main.py`. `prep` now also
   mirrors `@prep_function`'s error filtering (swallow query-too-old /
   reply-not-found / Forbidden). ⏳ runtime-verify needs a token + Postgres.
-- [ ] **4. Settings & links** — settings conversation (name, tags, wpp, seen,
-  warning), `my_links` (add/remove/rename cid with limits), privacy/help/donate/
-  myuid/bug.
+- [x] **4. Settings & links** — `settings.go` (settings conversation: states
+  name/custom-tag/audio-tag + wpp/seen/warning toggles + reply-quote/media/
+  easier-answer/channel-signature explainers + unblock-me/unblock-all +
+  what-is-formatting popup) and `mylinks.go` (`my_links` conversation:
+  add/remove/rename cid with the per-user limit, charset + uniqueness checks,
+  IntegrityError race handling via `db.IsUniqueViolation`) + the more-links
+  callback. privacy/help/donate/myuid/bug already done in Phase 2. ⏳
+  runtime-verify needs a token + Postgres.
 - [ ] **5. Admin & jobs** — admin panel (ban, stats, report, mass-msg, backup,
   ai-url/ai-session dynamic settings), AI chat queue, GM/GN, set_commands, db
   check.

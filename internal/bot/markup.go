@@ -76,6 +76,16 @@ func donationRow(donationLink string) []gotgbot.InlineKeyboardButton {
 	return []gotgbot.InlineKeyboardButton{urlBtn(btnDonation, donationLink)}
 }
 
+// ikb assembles an InlineKeyboardMarkup from rows.
+func ikb(rows ...[]gotgbot.InlineKeyboardButton) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+// row groups buttons into one keyboard row.
+func row(btns ...gotgbot.InlineKeyboardButton) []gotgbot.InlineKeyboardButton {
+	return btns
+}
+
 // settingsMainMenu mirrors SETTINGS_MARKUP["main-menu-set"].
 func settingsMainMenu() [][]gotgbot.InlineKeyboardButton {
 	return [][]gotgbot.InlineKeyboardButton{

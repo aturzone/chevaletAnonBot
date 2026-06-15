@@ -36,18 +36,101 @@ func (b *Bot) registerHandlers() {
 	// delete_message_handler — the warning's "delete" button, standalone.
 	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("delete|"), b.topLevel(deleteMsgClbk)))
 
-	// Phase 2 self-contained commands.
+	// help + the "why multiple links" callback.
 	b.command("help", cmdHelp)
+	d.AddHandler(handlers.NewCallback(cqContains("more-links"), b.topLevel(moreLinks)))
+
+	// my_links and settings conversations.
+	d.AddHandler(b.myLinksConversation())
+	d.AddHandler(b.settingsConversation())
+
+	// remaining Phase 2 self-contained commands.
 	b.command("privacy", cmdPrivacy)
 	b.command("donate", cmdDonate)
 	b.command("myuid", cmdMyUID)
 	b.command("bug", cmdBug)
 
-	// other_messages_handler — the catch-all, registered LAST so the conversation
-	// and media handlers take precedence. The Python `& ~IsDirectMessageFilter`
+	// other_messages_handler — the catch-all, registered LAST so the conversations
+	// and media handler take precedence. The Python `& ~IsDirectMessageFilter`
 	// (exclude business "direct messages" chats) is unnecessary here because prep
 	// already restricts handling to private chats.
 	d.AddHandler(handlers.NewMessage(msgfilters.All, b.topLevel(otherMessages)))
+}
+
+// settingsConversation builds the ConversationHandler ported from settings.py:
+// state "0" = changing the display name, "1" = custom tag, "2" = audio tag.
+func (b *Bot) settingsConversation() handlers.Conversation {
+	entryPoints := []ext.Handler{
+		handlers.NewCallback(cqfilters.Prefix("reply-quote|"), b.prep(replyQuote)),
+		handlers.NewCallback(cqfilters.Prefix("media-settings|"), b.prep(mediaSettings)),
+		handlers.NewCallback(cqfilters.Prefix("change-name|"), b.prep(changeName)),
+		handlers.NewCallback(cqfilters.Prefix("custom-tag|"), b.prep(customTag)),
+		handlers.NewCallback(cqfilters.Prefix("audio-tag|"), b.prep(audioTag)),
+		handlers.NewCallback(cqfilters.Prefix("wpp|"), b.prep(wppClbk)),
+		handlers.NewCallback(cqfilters.Prefix("warning|"), b.prep(warningClbk)),
+		handlers.NewCallback(cqfilters.Prefix("easier-answer|"), b.prep(easierAnswer)),
+		handlers.NewCallback(cqfilters.Prefix("channel-signature|"), b.prep(channelSignature)),
+		handlers.NewCallback(cqfilters.Prefix("seen-settings|"), b.prep(seenSettings)),
+		handlers.NewCallback(cqfilters.Prefix("unblock-all|"), b.prep(unblockAll)),
+		handlers.NewCallback(cqfilters.Prefix("unblock-me|"), b.prep(unblockMe)),
+		handlers.NewCommand("settings", b.prep(settingsCmd)),
+		handlers.NewCallback(cqContains("settings-menu"), b.prep(settingsCmd)),
+		handlers.NewCallback(cqContains("what-is-formatting"), b.prep(whatIsFormatting)),
+	}
+
+	return handlers.NewConversation(
+		entryPoints,
+		map[string][]ext.Handler{
+			"0": {handlers.NewMessage(textNotCommand, b.prep(updateName))},
+			"1": {
+				handlers.NewCallback(cqContains("rm-custom-tag"), b.prep(removeCustomTag)),
+				handlers.NewMessage(textNotCommand, b.prep(updateCustomTag)),
+			},
+			"2": {
+				handlers.NewCallback(cqContains("rm-audio-tag"), b.prep(removeAudioTag)),
+				handlers.NewMessage(textNotCommand, b.prep(updateAudioTag)),
+			},
+		},
+		&handlers.ConversationOpts{
+			Fallbacks: []ext.Handler{
+				handlers.NewCallback(cqContains("what-is-formatting"), b.prep(whatIsFormatting)),
+				handlers.NewCallback(cqContains("settings-menu"), b.prep(settingsCmd)),
+				handlers.NewCallback(cqContains("nvm-back-to-menu"), b.prep(settingsCmd)),
+				handlers.NewCommand("cancel", b.prep(genericCancelCmd)),
+				handlers.NewMessage(msgfilters.All, b.prep(settingsCancelAll)),
+			},
+			StateStorage: conversation.NewInMemoryStorage(conversation.KeyStrategySender),
+		},
+	)
+}
+
+// myLinksConversation builds the ConversationHandler ported from my_links.py:
+// state "0" = waiting for the new cid while renaming a link.
+func (b *Bot) myLinksConversation() handlers.Conversation {
+	entryPoints := []ext.Handler{
+		handlers.NewCallback(cqfilters.Prefix("ch-link"), b.prep(changeLink)),
+		handlers.NewCallback(cqContains("add-link"), b.prep(addLink)),
+		handlers.NewCallback(cqfilters.Prefix("rm-link"), b.prep(removeLink)),
+		handlers.NewCommand("my_links", b.prep(myLinksCmd)),
+		handlers.NewCallback(cqContains("mylinks-menu"), b.prep(myLinksCmd)),
+		handlers.NewCallback(cqContains("what-is-cid"), b.prep(whatIsCid)),
+	}
+
+	return handlers.NewConversation(
+		entryPoints,
+		map[string][]ext.Handler{
+			"0": {handlers.NewMessage(textNotCommand, b.prep(updateCid))},
+		},
+		&handlers.ConversationOpts{
+			Fallbacks: []ext.Handler{
+				handlers.NewCallback(cqContains("what-is-cid"), b.prep(whatIsCid)),
+				handlers.NewCallback(cqContains("mylinks-menu"), b.prep(myLinksCmd)),
+				handlers.NewCommand("cancel", b.prep(genericCancelCmd)),
+				handlers.NewMessage(msgfilters.All, b.prep(othersWhileSending)),
+			},
+			StateStorage: conversation.NewInMemoryStorage(conversation.KeyStrategySender),
+		},
+	)
 }
 
 // startConversation builds the ConversationHandler ported from start.py
@@ -92,6 +175,10 @@ func (b *Bot) startConversation() handlers.Conversation {
 // notCommand mirrors PTB's `filters.ALL & ~filters.COMMAND` for the state-0
 // send_msg handler: any message that is not a bot command.
 func notCommand(m *gotgbot.Message) bool { return !msgfilters.Command(m) }
+
+// textNotCommand mirrors PTB's `filters.TEXT & ~filters.COMMAND` for the
+// settings/my_links text-input states.
+func textNotCommand(m *gotgbot.Message) bool { return msgfilters.Text(m) && !msgfilters.Command(m) }
 
 // cqContains builds a callback-query filter matching data that CONTAINS sub,
 // reproducing the Python CallbackQueryHandler patterns that used an unanchored

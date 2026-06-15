@@ -45,6 +45,15 @@ type convData struct {
 
 	// "sent_medias": message ids already copied to the target for this group.
 	sentMedias []string
+
+	// settings conversation (settings.py): the menu message id to delete after a
+	// name/tag update.
+	ogMID int64 // "og_mid"
+
+	// my_links conversation (my_links.py): the cid being renamed and the links
+	// message id to refresh.
+	chosenCid string // "chosen_cid"
+	linksMID  int64  // "links_mid"
 }
 
 // clear mirrors context.user_data.clear(). It resets every stashed value but
