@@ -1,0 +1,86 @@
+# Staging stack for the Go port. Runs the Go bot against its OWN throwaway
+# Postgres — it never touches the production database.
+#
+# Usage (from this directory, with a .env alongside it):
+#   docker compose up --build
+#
+# The .env should be a copy of ../../.env.example with:
+#   - BOT_TOKEN   = your STAGING bot token (from BotFather)
+#   - PROXY       = your proxy URL (Telegram is otherwise unreachable)
+#   - DB_NAME / DB_USER / DB_PASS = anything (a fresh test db is created here)
+# DB_HOST is overridden to the postgres service below.
+
+services:
+  go-postgres:
+    image: postgres:16-alpine
+    container_name: chevalet-go-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - go_postgres_data:/var/lib/postgresql/data
+    networks:
+      - go-bot-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  go-bot:
+    build:
+      context: ../..
+      dockerfile: deploy/go/Dockerfile
+    container_name: chevalet-go-bot
+    restart: unless-stopped
+    depends_on:
+      go-postgres:
+        condition: service_healthy
+    environment:
+      - DB_HOST=go-postgres
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - PROXY=${PROXY}
+      - REPORT_CHAT_ID=${REPORT_CHAT_ID}
+      - ERROR_CHAT_ID=${ERROR_CHAT_ID}
+      - ADMINS=${ADMINS}
+      - SELLER_ADMIN=${SELLER_ADMIN}
+      - SUPPORT_ADMIN=${SUPPORT_ADMIN}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - MAX_NAME_LENGTH=${MAX_NAME_LENGTH}
+      - DEFAULT_CID_LIMIT=${DEFAULT_CID_LIMIT}
+      - MAX_CID_LENGTH=${MAX_CID_LENGTH}
+      - MIN_CID_LENGTH=${MIN_CID_LENGTH}
+      - HEALTH_PORT=${HEALTH_PORT}
+      - BOT_HEALTH_PORT=${BOT_HEALTH_PORT}
+      - BASE_ADDRESS=${BASE_ADDRESS}
+      - SEND_GM_GN=${SEND_GM_GN}
+      - GM_TIME=${GM_TIME}
+      - GN_TIME=${GN_TIME}
+      - GM_GROUP_ID=${GM_GROUP_ID}
+      - GM_GROUP_TOPIC_ID=${GM_GROUP_TOPIC_ID}
+      - AI_URL=${AI_URL}
+      - AI_SESSION_ID=${AI_SESSION_ID}
+      - AI_INTERVAL=${AI_INTERVAL}
+      - DONATION_LINK=${DONATION_LINK}
+    networks:
+      - go-bot-network
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost ${HEALTH_PORT} || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+networks:
+  go-bot-network:
+    driver: bridge
+
+volumes:
+  go_postgres_data:
+    driver: local
