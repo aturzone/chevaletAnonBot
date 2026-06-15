@@ -1,0 +1,30 @@
+<code>/admin help</code>: to get help
+🔸---------------
+<code>/admin send-mass-msg</code>: send mass message to users / reply the message you want to send to all the users
+<code>/admin send-msg UID</code>: send message to one user / reply the message you want to send
+🔸---------------
+<code>/admin user-count</code>: to get the number of users
+🔸---------------
+<code>/admin stats UID</code>: to get the status of the user
+   -> ban status, max number of cid's allowed
+🔸---------------
+<code>/admin ban UID</code>: to ban a user
+<code>/admin unban UID</code>: to unban a user
+🔸---------------
+<code>/admin cid get UID</code>: to get the cid limit of a user
+<code>/admin cid set UID LIMIT</code>: to set the cid limit of a user | LIMIT is int
+<code>/admin link UID</code>: to get the user in a hyperlinked format
+🔸---------------
+<code>/admin report add REPORT_ID</code>: add REPORT_ID to database
+<code>/admin report del REPORT_ID</code>: del all the REPORT_ID from database
+<code>/admin report get REPORT_ID</code>: get count of REPORT_ID in database
+<code>/admin report get all</code>: get all the reports in database
+🔸---------------
+<code>/admin ai-url get</code>: get current AI URL
+<code>/admin ai-url set URL</code>: set new AI URL
+<code>/admin ai-url reset</code>: reset AI URL to config default
+<code>/admin ai-session get</code>: get current AI session ID
+<code>/admin ai-session set SESSION_ID</code>: set new AI session ID
+<code>/admin ai-session reset</code>: reset AI session ID to config default
+🔸---------------
+<code>/admin backup</code>: send the last backup file

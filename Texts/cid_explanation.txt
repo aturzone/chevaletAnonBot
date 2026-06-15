@@ -1,0 +1,9 @@
+<code>t.me/Chevalet_bot?start=BXvaEubERWey</code>
+این یک نمونه از لینک ناشناسه. هر لینک ناشناس دو بخشه:
+
+بخش اول:
+<code>t.me/Chevalet_bot?start=</code>
+بخش دوم:
+<code>BXvaEubERWey</code>
+
+بخش دوم آیدی لینک شما هست که برای هر لینک و هر یوزر متفاوته. میتونید این قسمت رو شخصی سازی کنید D:

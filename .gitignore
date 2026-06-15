@@ -1,0 +1,33 @@
+*venv*
+__pycache__/
+/temp/
+*.log
+log-mass-msg.txt
+.env
+.vscode
+dynamic_settings.json
+
+# AI
+.claude/settings.local.json
+
+# Docker
+backups/
+*.sql
+*.sql.gz
+setup-backup-windows.txt
+
+# Go
+*.exe
+*.exe~
+/bin/
+/dist/
+/bot
+/cmd/bot/bot
+vendor/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# others
+radioatu_mydatabase.csv

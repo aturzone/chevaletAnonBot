@@ -1,0 +1,81 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: telegram-bot-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./backups:/backups
+    networks:
+      - bot-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Telegram Bot
+  bot:
+    build: .
+    container_name: telegram-bot
+    restart: unless-stopped
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DB_HOST=postgres
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - REPORT_CHAT_ID=${REPORT_CHAT_ID}
+      - ERROR_CHAT_ID=${ERROR_CHAT_ID}
+      - ADMINS=${ADMINS}
+      - SELLER_ADMIN=${SELLER_ADMIN}
+      - SUPPORT_ADMIN=${SUPPORT_ADMIN}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - MAX_NAME_LENGTH=${MAX_NAME_LENGTH}
+      - DEFAULT_CID_LIMIT=${DEFAULT_CID_LIMIT}
+      - MAX_CID_LENGTH=${MAX_CID_LENGTH}
+      - MIN_CID_LENGTH=${MIN_CID_LENGTH}
+      - HEALTH_PORT=${HEALTH_PORT}
+      - BOT_HEALTH_PORT=${BOT_HEALTH_PORT}
+      - BASE_ADDRESS=${BASE_ADDRESS}
+      - SEND_GM_GN=${SEND_GM_GN}
+      - GM_TIME=${GM_TIME}
+      - GN_TIME=${GN_TIME}
+      - GM_GROUP_ID=${GM_GROUP_ID}
+      - GM_GROUP_TOPIC_ID=${GM_GROUP_TOPIC_ID}
+      - AI_URL=${AI_URL}
+      - AI_SESSION_ID=${AI_SESSION_ID}
+      - AI_INTERVAL=${AI_INTERVAL}
+      - DONATION_LINK=${DONATION_LINK}
+    volumes:
+      - ./logs:/app/logs
+      - ./dynamic_settings.json:/app/dynamic_settings.json
+      - ./Texts:/app/Texts:ro
+      - ./backups:/app/backups
+    networks:
+      - bot-network
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c 'import socket; s=socket.socket(); s.connect((\"localhost\", ${HEALTH_PORT})); s.close()'" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  bot-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
