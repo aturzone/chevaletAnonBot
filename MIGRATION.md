@@ -81,9 +81,12 @@ Static assets reused verbatim: `Texts/`, `dynamic_settings.json`, `.env`,
   central error hook (notifies `ERROR_CHAT_ID`), `internal/texts` loader, health
   + graceful shutdown wired in `main`. Vertical slice: `/help`, `/privacy`,
   `/donate` work end-to-end. ⏳ runtime-verify needs a token + Postgres.
-- [ ] **3. Core messaging** — `/start [cid|UNBLOCK-uid]`, send/copy, the
-  reply/seen/block/report/delete callbacks, media groups, reply-to-channel,
-  tags (custom/audio), warning + auto-delete.
+- [~] **3. Core messaging** — *foundations done & pushed:* `markup.go`
+  (reply_markups verbatim), `getuser.go`, `tgerr.go` (gotgbot error
+  predicates). *In progress (the intricate ~600 lines):* `send_msg_template`,
+  `/start [cid|UNBLOCK-uid]`, the reply/seen/block/report/delete callbacks,
+  media groups, reply-to-channel, tags (custom/audio), warning + auto-delete,
+  and the gotgbot ConversationHandler wiring (state 0 = sending, per-user).
 - [ ] **4. Settings & links** — settings conversation (name, tags, wpp, seen,
   warning), `my_links` (add/remove/rename cid with limits), privacy/help/donate/
   myuid/bug.
