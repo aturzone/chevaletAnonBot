@@ -117,8 +117,35 @@ Static assets reused verbatim: `Texts/`, `dynamic_settings.json`, `.env`,
   Conversations re-keyed to KeyStrategySenderAndChat (= PTB per_user+per_chat)
   so GM-group messages reach the AI handler instead of a stale private state.
   ⏳ runtime-verify needs a token + Postgres + the AI endpoint.
-- [ ] **6. Parity & cutover** — run Go against a copy of prod DB with a staging
-  token, diff behavior vs Python, then the production switch (runbook below).
+- [~] **6. Parity & cutover** — *parity self-review done* (the whole Python
+  surface is ported; see the parity notes below). *Pending:* the user's
+  server-side live test with a staging token against a copy of prod DB, then the
+  production switch (runbook below).
+
+### Parity notes (Python quirks reproduced / bugs fixed)
+
+Reproduced verbatim (harmless quirks): `@None` username for a user without one;
+`delete_notify_on_END`'s notify-deletion is dead code (the `user_data.clear()`
+wipes `wrapper_list` before the append), so the "جواب جدید:" notify is never
+deleted; the deletion-warning leaves a trailing newline after stripping the
+countdown; the literal `"None"` mid in a warning's delete callback_data when
+there is no notify message; `/help` (or any message) while composing triggers
+the "cancelled" fallback.
+
+Fixed (with code comments): `AddCID` collision retry; `RemoveBlock` real
+affected-row count (so unblock's "wasn't blocked" popup can fire); the pre-send
+notify crash (`notify_msg.message_id` on a rejected send); `ai_responser`
+`return` on empty output that permanently killed the worker; the
+seen/block/unblock keyboard swap silently failing because the rebuilt donation
+URL button was invalid (now preserved verbatim); block/unblock prefix-only
+replace (vs Python's `replace`-all that could corrupt the chevaletid); warning
+text formats only `DELETION_TEXT` so a `%` in a display name can't break it.
+
+Behavioural matches worth noting: handler precedence follows `main.py`'s group-0
+order (one handler per update); conversations use `KeyStrategySenderAndChat`
+(= PTB `per_user`+`per_chat`) so GM-group messages reach the AI handler; `prep`
+swallows the same benign errors `@prep_function` did (query-too-old,
+reply-not-found, Forbidden).
 
 ---
 

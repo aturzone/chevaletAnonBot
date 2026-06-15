@@ -42,21 +42,21 @@ func sendMsg(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	return outcome.toState()
 }
 
-// sendMsgTemplate is the delete_notify_on_END wrapper around the core send.
-// It deletes the pre-send notify message when the core returns a del sentinel,
-// then maps del+0 -> state 0 and del+e/normal -> END (mirroring the decorator).
+// sendMsgTemplate is the delete_notify_on_END wrapper around the core send: it
+// maps the del sentinels to a conversation outcome (del+0 -> state 0, del+e /
+// normal -> END).
+//
+// Faithful subtlety: the Python delete_notify_on_END ALSO tried to delete the
+// pre-send "جواب جدید:" notify (wrapper_list[0]) on failure — but
+// send_msg_template's `context.user_data.clear()` runs BEFORE the notify is
+// appended, and the append targets `user_data.get("wrapper_list", [])`, i.e. a
+// throwaway list (the key was just cleared). So the decorator's wrapper_list is
+// always empty and that deletion is dead code (the IndexError is swallowed). We
+// reproduce that exactly: the notify is never deleted here.
 func (b *Bot) sendMsgTemplate(ctx *ext.Context, userid string) (sendOutcome, error) {
-	var wrapperList []*gotgbot.Message
-	sentinel, err := b.sendMsgCore(ctx, userid, &wrapperList)
+	sentinel, err := b.sendMsgCore(ctx, userid)
 	if err != nil {
 		return outcomeEnd, err
-	}
-	if sentinel == del0 || sentinel == delE {
-		// delete_notify_on_END deletes wrapper_list[0] (the "جواب جدید:" notify)
-		// when the send failed; guarded, like the Python try/except.
-		if len(wrapperList) > 0 && wrapperList[0] != nil {
-			_, _ = wrapperList[0].Delete(b.TG, nil)
-		}
 	}
 	if sentinel == del0 {
 		return outcomeState0, nil
@@ -67,9 +67,8 @@ func (b *Bot) sendMsgTemplate(ctx *ext.Context, userid string) (sendOutcome, err
 // sendMsgCore ports handler_templates.send_msg_template (the function body,
 // before the decorator). It returns one of delNone(""), del0, delE: "" means a
 // plain END (success or an early bail), del0/delE carry the handle_target_send
-// sentinels up to the wrapper. wrapperList collects the notify message for the
-// wrapper to delete on failure.
-func (b *Bot) sendMsgCore(ctx *ext.Context, userid string, wrapperList *[]*gotgbot.Message) (string, error) {
+// sentinels up to the wrapper.
+func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 	msg := ctx.EffectiveMessage
 	ud := b.ud(ctx)
 
@@ -207,7 +206,8 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string, wrapperList *[]*gotgb
 		replyToChatStr = ""
 		replyToMidStr = strconv.FormatInt(nm.MessageId, 10)
 		quoteText, quotePosition = "", 0
-		*wrapperList = append(*wrapperList, nm)
+		// (Python appended notify_msg to a throwaway wrapper_list here; see the
+		// note in sendMsgTemplate — the decorator's deletion is dead code.)
 	}
 
 	// trailing donation row

@@ -136,7 +136,7 @@ func seen(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 			if strings.HasPrefix(btn.CallbackData, "seen") {
 				return cb(msgBtnSeenDone, "alread-seen")
 			}
-			return cb(btn.Text, btn.CallbackData)
+			return btn // verbatim — preserves the donation URL button (see transformKeyboard)
 		})
 		_, _, _ = msg.EditReplyMarkup(tg, &gotgbot.EditMessageReplyMarkupOpts{
 			ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: newKB},
@@ -189,9 +189,14 @@ func block(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 		}
 		newKB := transformKeyboard(msg.ReplyMarkup.InlineKeyboard, func(btn gotgbot.InlineKeyboardButton) gotgbot.InlineKeyboardButton {
 			if strings.HasPrefix(btn.CallbackData, "block") {
-				return cb(msgBtnUnblock, strings.Replace(btn.CallbackData, "block", "unblock", 1))
+				// Swap only the "block" PREFIX to "unblock". The Python original
+				// used callback_data.replace("block","unblock") (replace-all),
+				// which would corrupt the embedded chevaletid if it ever contained
+				// the substring "block"; replacing just the prefix is the intended,
+				// safe behaviour.
+				return cb(msgBtnUnblock, "unblock|"+strings.TrimPrefix(btn.CallbackData, "block|"))
 			}
-			return cb(btn.Text, btn.CallbackData)
+			return btn // verbatim — preserves the donation URL button (see transformKeyboard)
 		})
 		_, _, _ = msg.EditReplyMarkup(tg, &gotgbot.EditMessageReplyMarkupOpts{
 			ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: newKB},
@@ -251,9 +256,10 @@ func unblock(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 		}
 		newKB := transformKeyboard(msg.ReplyMarkup.InlineKeyboard, func(btn gotgbot.InlineKeyboardButton) gotgbot.InlineKeyboardButton {
 			if strings.HasPrefix(btn.CallbackData, "unblock") {
-				return cb(msgBtnBlock, strings.Replace(btn.CallbackData, "unblock", "block", 1))
+				// Swap only the "unblock" PREFIX (see the note in block()).
+				return cb(msgBtnBlock, "block|"+strings.TrimPrefix(btn.CallbackData, "unblock|"))
 			}
-			return cb(btn.Text, btn.CallbackData)
+			return btn // verbatim — preserves the donation URL button (see transformKeyboard)
 		})
 		_, _, _ = msg.EditReplyMarkup(tg, &gotgbot.EditMessageReplyMarkupOpts{
 			ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: newKB},
@@ -531,7 +537,15 @@ func noCallback(_ *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
 
 // transformKeyboard rebuilds an inline keyboard, applying fn to every button.
 // Used by seen/block/unblock to swap a single button in place while preserving
-// the rest, mirroring the Python list comprehensions.
+// the rest.
+//
+// Faithful fix: the Python list comprehensions rebuilt EVERY button as
+// InlineKeyboardButton(text, callback_data=...), dropping other button types —
+// so the trailing donation URL button became invalid (no url, no callback_data)
+// and edit_reply_markup silently failed (caught by `except: pass`), meaning the
+// seen/block/unblock button never actually changed on delivered messages (the
+// DB action still happened). Here the pass-through fns return the button
+// verbatim, so the swap works as intended.
 func transformKeyboard(kb [][]gotgbot.InlineKeyboardButton, fn func(gotgbot.InlineKeyboardButton) gotgbot.InlineKeyboardButton) [][]gotgbot.InlineKeyboardButton {
 	out := make([][]gotgbot.InlineKeyboardButton, 0, len(kb))
 	for _, row := range kb {
