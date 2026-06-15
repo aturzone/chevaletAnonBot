@@ -76,8 +76,11 @@ Static assets reused verbatim: `Texts/`, `dynamic_settings.json`, `.env`,
   `DBHandler` method (users/blocks/cids/reports) + integration test
   (`db_test.go`, skips without `DB_HOST`). ⏳ runtime-verify against a Postgres
   (no Docker on this dev box yet) / a restored prod backup.
-- [ ] **2. Bot skeleton** — gotgbot dispatcher, `prep` middleware (userid + dbh
-  injection), `init_user`, error hook, wire health + graceful shutdown.
+- [x] **2. Bot skeleton** — gotgbot dispatcher + long-polling updater, `prep`
+  middleware (private-chat filter, `init_user`, ban check, userid injection),
+  central error hook (notifies `ERROR_CHAT_ID`), `internal/texts` loader, health
+  + graceful shutdown wired in `main`. Vertical slice: `/help`, `/privacy`,
+  `/donate` work end-to-end. ⏳ runtime-verify needs a token + Postgres.
 - [ ] **3. Core messaging** — `/start [cid|UNBLOCK-uid]`, send/copy, the
   reply/seen/block/report/delete callbacks, media groups, reply-to-channel,
   tags (custom/audio), warning + auto-delete.
