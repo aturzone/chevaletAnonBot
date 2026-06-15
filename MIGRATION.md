@@ -72,9 +72,10 @@ Static assets reused verbatim: `Texts/`, `dynamic_settings.json`, `.env`,
 
 - [x] **0. Foundation** — repo/branch setup, `go.mod`, `internal/config`,
   `internal/encoder` (+ golden tests), `internal/health`, `cmd/bot` skeleton.
-- [ ] **1. Database** — `internal/db`: pgx pool, identical schema, every
-  `DBHandler` method (users/blocks/cids/reports). Verify against a restored prod
-  backup.
+- [x] **1. Database** — `internal/db`: pgx pool, identical schema, every
+  `DBHandler` method (users/blocks/cids/reports) + integration test
+  (`db_test.go`, skips without `DB_HOST`). ⏳ runtime-verify against a Postgres
+  (no Docker on this dev box yet) / a restored prod backup.
 - [ ] **2. Bot skeleton** — gotgbot dispatcher, `prep` middleware (userid + dbh
   injection), `init_user`, error hook, wire health + graceful shutdown.
 - [ ] **3. Core messaging** — `/start [cid|UNBLOCK-uid]`, send/copy, the

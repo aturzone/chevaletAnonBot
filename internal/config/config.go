@@ -50,6 +50,7 @@ type Config struct {
 	DBUser string
 	DBPass string
 	DBHost string
+	DBPort int // optional (DB_PORT), defaults to 5432; config.py had no such key
 
 	LogLevel string
 
@@ -152,6 +153,16 @@ func Load() (*Config, error) {
 		c.BotHealthPort = n
 	} else {
 		c.BotHealthPort = c.HealthPort
+	}
+
+	// DB_PORT is optional (psycopg2 defaulted to 5432).
+	c.DBPort = 5432
+	if v, ok := os.LookupEnv("DB_PORT"); ok && v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.DBPort = n
+		} else {
+			errs = append(errs, fmt.Sprintf("DB_PORT must be an integer (got %q)", v))
+		}
 	}
 
 	// AI_INTERVAL defaults to 5 (matches config.py's get with default 5).
