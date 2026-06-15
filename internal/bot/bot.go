@@ -17,6 +17,7 @@ import (
 
 	"github.com/aturzone/chevaletAnonBot/internal/config"
 	"github.com/aturzone/chevaletAnonBot/internal/db"
+	"github.com/aturzone/chevaletAnonBot/internal/dynset"
 	"github.com/aturzone/chevaletAnonBot/internal/encoder"
 	"github.com/aturzone/chevaletAnonBot/internal/texts"
 )
@@ -33,9 +34,11 @@ type Bot struct {
 	DB    *db.DB
 	Cfg   *config.Config
 	Texts *texts.Loader
+	Dyn   *dynset.Settings
 
-	users  *userStore
-	admins map[string]bool
+	users   *userStore
+	aiQueue *aiQueue
+	admins  map[string]bool
 }
 
 // New builds the Telegram bot, dispatcher and updater, and registers handlers.
@@ -62,12 +65,14 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 	}
 
 	b := &Bot{
-		TG:     tg,
-		DB:     database,
-		Cfg:    cfg,
-		Texts:  txt,
-		users:  newUserStore(),
-		admins: make(map[string]bool, len(cfg.Admins)),
+		TG:      tg,
+		DB:      database,
+		Cfg:     cfg,
+		Texts:   txt,
+		Dyn:     dynset.New("dynamic_settings.json", cfg.AIURL, cfg.AISessionID),
+		users:   newUserStore(),
+		aiQueue: newAIQueue(),
+		admins:  make(map[string]bool, len(cfg.Admins)),
 	}
 	for _, a := range cfg.Admins {
 		b.admins[a] = true
@@ -96,6 +101,11 @@ func (b *Bot) Run(ctx context.Context) error {
 	}
 
 	slog.Info("bot polling", "username", b.TG.User.Username)
+
+	// Start the background jobs (set_commands, AI responder, GM/GN greetings,
+	// hourly DB check); they stop when ctx is cancelled.
+	b.startBackground(ctx)
+
 	<-ctx.Done()
 	slog.Info("stopping updater")
 	return b.Updater.Stop()

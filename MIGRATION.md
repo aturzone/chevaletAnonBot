@@ -106,9 +106,17 @@ Static assets reused verbatim: `Texts/`, `dynamic_settings.json`, `.env`,
   IntegrityError race handling via `db.IsUniqueViolation`) + the more-links
   callback. privacy/help/donate/myuid/bug already done in Phase 2. ⏳
   runtime-verify needs a token + Postgres.
-- [ ] **5. Admin & jobs** — admin panel (ban, stats, report, mass-msg, backup,
-  ai-url/ai-session dynamic settings), AI chat queue, GM/GN, set_commands, db
-  check.
+- [x] **5. Admin & jobs** — `admin.go` (the /admin panel: help, send-mass-msg,
+  send-msg, user-count, stats, ban/unban, cid get/set, link, report
+  add/del/get, ai-url, ai-session, backup, with the Python wrong-syntax /
+  wrong-value error mapping), `internal/dynset` (dynamic_settings.json
+  ai_url/ai_session_id get/set/reset), `aiqueue.go` + `aichat.go` (GM-group
+  reply-to-bot → queue + 🤔 reaction) + `background.go` (set_commands, hourly DB
+  check, GM/GN daily Asia/Tehran via embedded tzdata, the AI responder loop
+  POSTing to AI_URL and replying in the GM group, and the admin mass-msg job).
+  Conversations re-keyed to KeyStrategySenderAndChat (= PTB per_user+per_chat)
+  so GM-group messages reach the AI handler instead of a stale private state.
+  ⏳ runtime-verify needs a token + Postgres + the AI endpoint.
 - [ ] **6. Parity & cutover** — run Go against a copy of prod DB with a staging
   token, diff behavior vs Python, then the production switch (runbook below).
 

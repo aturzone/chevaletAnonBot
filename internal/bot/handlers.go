@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
@@ -44,17 +45,30 @@ func (b *Bot) registerHandlers() {
 	d.AddHandler(b.myLinksConversation())
 	d.AddHandler(b.settingsConversation())
 
-	// remaining Phase 2 self-contained commands.
+	// remaining Phase 2/5 self-contained commands.
 	b.command("privacy", cmdPrivacy)
 	b.command("donate", cmdDonate)
+	b.command("admin", adminCmd)
 	b.command("myuid", cmdMyUID)
 	b.command("bug", cmdBug)
+
+	// ai_input_message_handler — the GM-group AI input. Registered (like main.py)
+	// just before the catch-all, WITHOUT prep, and only when GM_GROUP_ID is set.
+	if gid, ok := b.gmGroupID(); ok {
+		d.AddHandler(handlers.NewMessage(b.aiInputFilter(gid, botIDInt(b.Cfg.BotID)), b.aiInput))
+	}
 
 	// other_messages_handler — the catch-all, registered LAST so the conversations
 	// and media handler take precedence. The Python `& ~IsDirectMessageFilter`
 	// (exclude business "direct messages" chats) is unnecessary here because prep
 	// already restricts handling to private chats.
 	d.AddHandler(handlers.NewMessage(msgfilters.All, b.topLevel(otherMessages)))
+}
+
+// botIDInt parses the numeric bot id (BOT_TOKEN before the ':'); 0 on failure.
+func botIDInt(botID string) int64 {
+	n, _ := strconv.ParseInt(botID, 10, 64)
+	return n
 }
 
 // settingsConversation builds the ConversationHandler ported from settings.py:
@@ -99,7 +113,7 @@ func (b *Bot) settingsConversation() handlers.Conversation {
 				handlers.NewCommand("cancel", b.prep(genericCancelCmd)),
 				handlers.NewMessage(msgfilters.All, b.prep(settingsCancelAll)),
 			},
-			StateStorage: conversation.NewInMemoryStorage(conversation.KeyStrategySender),
+			StateStorage: conversation.NewInMemoryStorage(conversation.KeyStrategySenderAndChat),
 		},
 	)
 }
@@ -128,7 +142,7 @@ func (b *Bot) myLinksConversation() handlers.Conversation {
 				handlers.NewCommand("cancel", b.prep(genericCancelCmd)),
 				handlers.NewMessage(msgfilters.All, b.prep(othersWhileSending)),
 			},
-			StateStorage: conversation.NewInMemoryStorage(conversation.KeyStrategySender),
+			StateStorage: conversation.NewInMemoryStorage(conversation.KeyStrategySenderAndChat),
 		},
 	)
 }
@@ -167,7 +181,12 @@ func (b *Bot) startConversation() handlers.Conversation {
 				handlers.NewCommand("cancel", b.prep(cancelCmd)),
 				handlers.NewMessage(msgfilters.All, b.prep(cancelAll)),
 			},
-			StateStorage: conversation.NewInMemoryStorage(conversation.KeyStrategySender),
+			// KeyStrategySenderAndChat == PTB's per_user + per_chat (the default the
+			// Python ConversationHandlers used). This keys a user's private-chat
+			// conversation to that chat, so their messages in the GM group are NOT
+			// captured by it and instead reach the AI handler. (Sender-only keying
+			// would have mis-routed GM-group replies into a stale private state.)
+			StateStorage: conversation.NewInMemoryStorage(conversation.KeyStrategySenderAndChat),
 		},
 	)
 }

@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	_ "time/tzdata" // embed the IANA tz database so Asia/Tehran (GM/GN) resolves without OS tzdata
 
 	"github.com/aturzone/chevaletAnonBot/internal/bot"
 	"github.com/aturzone/chevaletAnonBot/internal/config"
