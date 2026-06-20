@@ -1,3 +1,12 @@
+# Production stack for ChevaletAnonBot (Go): the bot + its PostgreSQL.
+#
+# Quick start:
+#   cp .env.example .env   # then fill in BOT_TOKEN, ADMINS, PROXY, ...
+#   make up                # or: docker compose up -d --build
+#
+# The Go bot runs `CREATE TABLE IF NOT EXISTS` on startup, so no schema file is
+# needed — existing data is preserved untouched.
+
 services:
   # PostgreSQL Database
   postgres:
@@ -11,17 +20,16 @@ services:
       POSTGRES_INITDB_ARGS: "--encoding=UTF8"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ./backups:/backups
     networks:
       - bot-network
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}" ]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Telegram Bot
+  # Telegram Bot (Go)
   bot:
     build: .
     container_name: telegram-bot
@@ -36,6 +44,7 @@ services:
       - DB_USER=${DB_USER}
       - DB_PASS=${DB_PASS}
       - BOT_TOKEN=${BOT_TOKEN}
+      - PROXY=${PROXY}
       - REPORT_CHAT_ID=${REPORT_CHAT_ID}
       - ERROR_CHAT_ID=${ERROR_CHAT_ID}
       - ADMINS=${ADMINS}
@@ -59,18 +68,20 @@ services:
       - AI_INTERVAL=${AI_INTERVAL}
       - DONATION_LINK=${DONATION_LINK}
     volumes:
-      - ./logs:/app/logs
+      # dynamic_settings.json is read/written at runtime (admin ai-url / ai-session).
       - ./dynamic_settings.json:/app/dynamic_settings.json
       - ./Texts:/app/Texts:ro
       - ./backups:/app/backups
     networks:
       - bot-network
     healthcheck:
-      test: [ "CMD-SHELL", "python -c 'import socket; s=socket.socket(); s.connect((\"localhost\", ${HEALTH_PORT})); s.close()'" ]
+      # The Go bot opens a TCP health listener on HEALTH_PORT; nc (busybox) ships
+      # in the alpine runtime image.
+      test: ["CMD-SHELL", "nc -z localhost ${HEALTH_PORT} || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 20s
 
 networks:
   bot-network:

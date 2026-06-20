@@ -1,27 +1,27 @@
-# Python 3.12 base image (matches your current environment)
-FROM python:3.12-slim
+# Multi-stage build for ChevaletAnonBot (Go).
+#
+# Build context is the repository root. The same image is used for production
+# (docker-compose.yml) and staging (deploy/go/docker-compose.yml).
 
-# Set working directory
+FROM golang:1.25-alpine AS build
+WORKDIR /src
+
+# Cache module downloads.
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Build a static binary (no cgo) so it runs on a bare alpine image.
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/bot ./cmd/bot
+
+FROM alpine:3.20
+# ca-certificates: HTTPS to the Telegram & AI endpoints.
+# tzdata: Asia/Tehran for the GM/GN greetings (also embedded in the binary).
+RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 
-# Install system dependencies for PostgreSQL
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/bot /app/bot
+# Static message templates are read from ./Texts at runtime.
+COPY Texts /app/Texts
 
-# Copy and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
-COPY . .
-
-# Create logs directory
-RUN mkdir -p /app/logs
-
-# Show Python output in real-time (unbuffered)
-ENV PYTHONUNBUFFERED=1
-
-# Run the bot
-CMD ["python", "main.py"]
+ENTRYPOINT ["/app/bot"]

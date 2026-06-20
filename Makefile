@@ -2,7 +2,7 @@
 # Usage: make <target>
 # Example: make up
 
-.PHONY: help gooz up down restart logs logs-bot logs-db build rebuild status shell db-shell backup restore clean dev-up dev-down test
+.PHONY: help gooz up down restart logs logs-bot logs-db build rebuild status shell db-shell backup restore clean dev-up dev-down test ensure-dynset go-build go-test go-test-race go-vet go-fmt go-run go-tidy
 
 # Default target - shows help
 .DEFAULT_GOAL := help
@@ -16,9 +16,35 @@ help: ## Show this help message
 	@echo ""
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+##@ Go Development
+
+go-build: ## Compile all packages
+	go build ./...
+
+go-test: ## Run the test suite
+	go test ./...
+
+go-test-race: ## Run the test suite with the race detector (needs a C compiler)
+	go test -race -count=1 ./...
+
+go-vet: ## Run go vet
+	go vet ./...
+
+go-fmt: ## Format all Go files in place (gofmt -w)
+	gofmt -w .
+
+go-run: ## Run the bot locally (needs a populated .env + reachable PostgreSQL)
+	go run ./cmd/bot
+
+go-tidy: ## Tidy go.mod / go.sum
+	go mod tidy
+
 ##@ Docker Operations
 
-up: ## Start all services (production)
+ensure-dynset: ## Create dynamic_settings.json if missing (needed for the bind mount)
+	@test -f dynamic_settings.json || (echo '{}' > dynamic_settings.json && echo "created empty dynamic_settings.json")
+
+up: ensure-dynset ## Start all services (production)
 	@echo "Starting services..."
 	docker-compose up -d
 	@echo "Services started! Check logs with: make logs"
@@ -38,7 +64,7 @@ build: ## Build Docker images
 	docker-compose build
 	@echo "Build complete."
 
-rebuild: ## Rebuild and restart services (use after code changes)
+rebuild: ensure-dynset ## Rebuild and restart services (use after code changes)
 	@echo "Rebuilding and restarting..."
 	docker-compose down
 	docker-compose up -d --build

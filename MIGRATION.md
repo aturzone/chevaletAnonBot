@@ -1,13 +1,15 @@
 # ChevaletAnonBot — Python → Go migration
 
-This branch (`go`) ports the production Telegram bot from Python
+This document records how ChevaletAnonBot was ported from Python
 (`python-telegram-bot` + psycopg2) to Go (`gotgbot` + pgx), with the goal of a
 **near-zero-downtime production cutover** that preserves every user, link,
-setting and feature.
+setting and feature. It is kept as design documentation (notably the cipher
+compatibility contract and the cutover runbook).
 
-The original Python code is preserved unchanged on the **`python`** branch.
-`main` is the production pointer (today: Python; after this port is verified:
-Go).
+This repository contains **only** the Go implementation. The original Python bot
+lives in a separate project; this port keeps the **identical** database schema,
+so the live Python bot and this Go bot are interchangeable against the same
+database — which is what makes the cutover below cheap.
 
 ---
 
@@ -178,8 +180,7 @@ go test ./...                     # encoder golden vectors must stay green
 go run ./cmd/bot                  # needs a populated .env (see .env.example)
 ```
 
-Regenerate the cipher golden vectors (only if the Python original ever changes):
-
-```sh
-python internal/encoder/testdata/gen_golden.py
-```
+The cipher golden vectors live in `internal/encoder/testdata/golden.json` and are
+**frozen** — they were generated from the original Python `encode`/`decode` and
+must never change, since buttons on already-delivered messages depend on the
+exact encoding. `encoder_test.go` asserts the Go decoder reproduces every vector.

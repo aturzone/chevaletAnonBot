@@ -1,0 +1,26 @@
+# Normalize line endings to LF in the repository for everyone (the Go toolchain,
+# gofmt and CI all expect LF). Without this, a checkout with core.autocrlf=true
+# on Windows makes gofmt report every .go file as unformatted.
+* text=auto eol=lf
+
+# Source & config: always LF.
+*.go      text eol=lf
+*.mod     text eol=lf
+*.sum     text eol=lf
+*.txt     text eol=lf
+*.md      text eol=lf
+*.json    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.toml    text eol=lf
+*.env     text eol=lf
+Dockerfile text eol=lf
+Makefile  text eol=lf
+
+# Shell scripts MUST be LF or they break on Linux.
+*.sh      text eol=lf
+
+# Binary assets (none yet, but future-proof).
+*.png     binary
+*.jpg     binary
+*.gz      binary

@@ -1,17 +1,38 @@
-*venv*
-.venv
-__pycache__/
-*.pyc
+# Keep the build context small. Note: Texts/ is intentionally NOT ignored — the
+# runtime stage copies it into the image.
 .git/
+.github/
 .gitignore
-.env
-*.log
-logs/
-.vscode/
-temp/
-*.md
-docker-compose*.yml
-Dockerfile
+.gitattributes
 .dockerignore
-*.sql
+
+# docs & local tooling
+*.md
+deploy/
+.vscode/
+.claude/
+
+# secrets & local runtime state
+.env
+.env.*
+dynamic_settings.json
+logs/
+temp/
+*.log
+
+# backups & dumps
 backups/
+*.sql
+*.sql.gz
+
+# build artifacts
+/bot
+/bin/
+/dist/
+*.exe
+*.exe~
+vendor/
+
+# OS cruft
+.DS_Store
+Thumbs.db

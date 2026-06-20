@@ -1,22 +1,25 @@
-*venv*
-__pycache__/
+# Local runtime state
 /temp/
 *.log
 log-mass-msg.txt
+mass-msg-failurs.txt
 .env
-.vscode
+.env.*
+!.env.example
 dynamic_settings.json
 
-# AI
+# Editor / tooling
+.vscode/
+.idea/
 .claude/settings.local.json
 
-# Docker
+# Docker / backups
 backups/
 *.sql
 *.sql.gz
 setup-backup-windows.txt
 
-# Go
+# Go build artifacts
 *.exe
 *.exe~
 /bin/
@@ -28,6 +31,3 @@ vendor/
 # OS
 .DS_Store
 Thumbs.db
-
-# others
-radioatu_mydatabase.csv

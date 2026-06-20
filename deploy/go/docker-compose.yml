@@ -33,7 +33,7 @@ services:
   go-bot:
     build:
       context: ../..
-      dockerfile: deploy/go/Dockerfile
+      dockerfile: Dockerfile
     container_name: chevalet-go-bot
     restart: unless-stopped
     depends_on:
