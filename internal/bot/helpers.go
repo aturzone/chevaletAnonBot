@@ -75,6 +75,29 @@ func indexOf(s []string, v string) int {
 	return -1
 }
 
+// chunkString splits s into pieces of at most size runes each, preserving order.
+// It splits on rune boundaries (not bytes) so a multi-byte UTF-8 character is
+// never cut in half — important when the chunks are sent as separate Telegram
+// messages. Mirrors the character-based slicing of error_handler.py's chunker.
+func chunkString(s string, size int) []string {
+	if size <= 0 {
+		return []string{s}
+	}
+	runes := []rune(s)
+	out := make([]string, 0, (len(runes)+size-1)/size)
+	for i := 0; i < len(runes); i += size {
+		end := i + size
+		if end > len(runes) {
+			end = len(runes)
+		}
+		out = append(out, string(runes[i:end]))
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
+}
+
 // equalStringSlices reports whether two string slices are element-wise equal.
 func equalStringSlices(a, b []string) bool {
 	if len(a) != len(b) {

@@ -2,11 +2,18 @@ package bot
 
 import (
 	"context"
+	"errors"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 
 	"github.com/aturzone/chevaletAnonBot/internal/encoder"
 )
+
+// errInitNoCID signals that initUser could not allocate a unique cid for the
+// user after config.MaxTryAddCID attempts — the Go equivalent of the Python
+// init_user returning False. prep turns it into the user-facing "couldn't make
+// an anonymous link" reply (decorators.py:69-74).
+var errInitNoCID = errors.New("init: could not allocate a unique cid")
 
 // initUser mirrors modules/Global/user_init.py plus the chevaletid bootstrap
 // from @prep_function: it upserts the user, ensures they have at least one cid,
@@ -32,8 +39,14 @@ func (b *Bot) initUser(ctx context.Context, userid string, u *gotgbot.User) erro
 		return err
 	}
 	if len(cids) == 0 {
-		if _, err := b.DB.AddCID(ctx, userid, encoder.GenerateCID(10)); err != nil {
+		ok, err := b.DB.AddCID(ctx, userid, encoder.GenerateCID(10))
+		if err != nil {
 			return err
+		}
+		if !ok {
+			// every cid attempt collided (astronomically unlikely) — mirror Python
+			// init_user returning False so prep can tell the user to retry.
+			return errInitNoCID
 		}
 	}
 

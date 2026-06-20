@@ -2,9 +2,11 @@ package bot
 
 import (
 	"errors"
+	"net/url"
 	"strings"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // These predicates classify gotgbot API errors the way modules/Global/
@@ -52,4 +54,31 @@ func errQueryTooOld(err error) bool { return descContains(err, "query is too old
 func errForbidden(err error) bool {
 	te := asTelegramError(err)
 	return te != nil && te.Code == 403
+}
+
+// isDBError reports whether err is a PostgreSQL/database failure, mirroring the
+// Python prep's `except (psycopg2.Error, psycopg2.DatabaseError)`: a server-side
+// SQL error (PgError) or a failure to establish a connection (ConnectError).
+// Both warrant the user-facing "database problem" reply and an ERROR_CHAT_ID
+// report. (A clean separation from isNetworkError: DB failures are pgconn types,
+// never a *url.Error.)
+func isDBError(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return true
+	}
+	var connErr *pgconn.ConnectError
+	return errors.As(err, &connErr)
+}
+
+// isNetworkError reports whether err is a transport-level failure talking to
+// Telegram — not a Telegram API error (those carry a TelegramError) — mirroring
+// the Python prep's `except NetworkError`. gotgbot speaks HTTP via net/http, so
+// such failures surface as a *url.Error.
+func isNetworkError(err error) bool {
+	if asTelegramError(err) != nil {
+		return false
+	}
+	var uerr *url.Error
+	return errors.As(err, &uerr)
 }

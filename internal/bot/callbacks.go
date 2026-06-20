@@ -500,7 +500,7 @@ func cancel(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
 	msg := ctx.EffectiveMessage
 	if _, _, err := msg.EditText(tg, txtCancelGone, nil); err != nil {
 		// matches Python which did not guard edit_text; a benign error is
-		// swallowed by classifyErr.
+		// swallowed by handleErr.
 		return err
 	}
 	b.scheduleDeleteMessage(msg)

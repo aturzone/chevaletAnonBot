@@ -229,23 +229,26 @@ func cmdHelp(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, _ string) error {
 	return b.replyHTML(ctx, txt, true)
 }
 
-// cmdPrivacy mirrors privacy.privacy_cmd: the privacy/safety text.
+// cmdPrivacy mirrors privacy.privacy_cmd: the privacy/safety text. Python called
+// reply_html WITHOUT disable_web_page_preview, so the link preview stays enabled.
 func cmdPrivacy(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, _ string) error {
 	txt, err := b.Texts.Get("privacy_safety")
 	if err != nil {
 		return err
 	}
-	return b.replyHTML(ctx, txt, true)
+	return b.replyHTML(ctx, txt, false)
 }
 
 // cmdDonate mirrors donate.donate_cmd: the donation text with the donation link.
+// Python called reply_html WITHOUT disable_web_page_preview, so the donation
+// link's preview card is shown.
 func cmdDonate(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, _ string) error {
 	txt, err := b.Texts.Get("donate")
 	if err != nil {
 		return err
 	}
 	txt = strings.ReplaceAll(txt, "%s", b.Cfg.DonationLink)
-	return b.replyHTML(ctx, txt, true)
+	return b.replyHTML(ctx, txt, false)
 }
 
 // cmdMyUID mirrors myuid.myuid_cmd: replies with the user's Telegram id.

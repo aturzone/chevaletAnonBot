@@ -53,30 +53,47 @@ func (b *Bot) prep(fn Handler) handlers.Response {
 		defer cancel()
 
 		if err := b.initUser(dbctx, userid, ctx.EffectiveUser); err != nil {
-			return b.classifyErr(err)
+			// init_user returning False (a unique cid couldn't be allocated):
+			// tell the user, wipe their state, end the conversation —
+			// decorators.py:69-74.
+			if errors.Is(err, errInitNoCID) {
+				ud.clear()
+				if ctx.EffectiveMessage != nil {
+					_, _ = ctx.EffectiveMessage.Reply(tg, txtInitNoCID, nil)
+				}
+				return handlers.EndConversation()
+			}
+			return b.handleErr(tg, ctx, err)
 		}
 
 		banned, err := b.DB.IsBanned(dbctx, userid)
 		if err != nil {
-			return b.classifyErr(err)
+			return b.handleErr(tg, ctx, err)
 		}
 		if banned {
 			return nil // banned users are silently ignored, as in the original
 		}
 
-		return b.classifyErr(fn(b, tg, ctx, userid))
+		return b.handleErr(tg, ctx, fn(b, tg, ctx, userid))
 	}
 }
 
-// classifyErr mirrors the except blocks of @prep_function, which wrapped every
-// handler: it swallows the benign Telegram errors PTB ignored (an old callback
-// query, a vanished reply target, or a Forbidden from a user who blocked the
-// bot) and lets conversation state changes through untouched. Everything else
-// propagates to the central error hook (onError), which — like the global PTB
-// error_handler — notifies ERROR_CHAT_ID and replies a tracking code. (The
-// Python prep had bespoke replies for DB/network errors; those are folded into
-// onError here, since pgxpool auto-reconnects make them rare.)
-func (b *Bot) classifyErr(err error) error {
+// handleErr mirrors the except blocks of @prep_function, which wrapped every
+// handler. In order, it:
+//   - lets conversation state changes through untouched;
+//   - swallows the benign Telegram errors PTB ignored (an old callback query, a
+//     vanished reply target, or a Forbidden from a user who blocked the bot);
+//   - on a database error, replies the "database problem" notice to the user and
+//     reports it to ERROR_CHAT_ID (decorators.py `except psycopg2.Error`);
+//   - on a Telegram transport/network error, replies the "internet problem"
+//     notice (decorators.py `except NetworkError`);
+//   - propagates everything else to the central error hook (onError), which —
+//     like the global PTB error_handler — notifies ERROR_CHAT_ID and replies a
+//     tracking code.
+//
+// The user-facing replies are best-effort (ignored on failure), exactly like the
+// Python `try: reply except: pass`.
+func (b *Bot) handleErr(tg *gotgbot.Bot, ctx *ext.Context, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -90,6 +107,17 @@ func (b *Bot) classifyErr(err error) error {
 	case errReplyNotFound(err):
 		return nil
 	case errForbidden(err): // covers "bot was blocked by the user" / "not a member"
+		return nil
+	case isDBError(err):
+		if ctx.EffectiveMessage != nil {
+			_, _ = ctx.EffectiveMessage.Reply(tg, txtDBProblem, nil)
+		}
+		b.reportToErrorChat(tg, "PostgreSQL ERROR: "+err.Error())
+		return nil
+	case isNetworkError(err):
+		if ctx.EffectiveMessage != nil {
+			_, _ = ctx.EffectiveMessage.Reply(tg, txtNetworkProblem, nil)
+		}
 		return nil
 	default:
 		return err

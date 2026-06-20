@@ -108,39 +108,49 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 		}
 	}
 
-	type tagTarget struct {
-		idx int
-		msg *gotgbot.Message
-	}
-	markAll := func() []tagTarget {
-		all := make([]tagTarget, 0, len(msgs))
-		for i, m := range msgs {
-			all = append(all, tagTarget{idx: i, msg: m})
+	// Parity with Python handle_media: it passes the raw tag straight to add_tag,
+	// and when the target has no custom tag (NULL -> Python None) the
+	// `og_text_html + "\n" + tag` concatenation raises a TypeError that add_tag
+	// swallows — so the album captions are left UNTOUCHED and no reply markup is
+	// placed on any media item; the keyboard reaches the target only via the
+	// carrier message below. Go's GetCustomTag maps NULL -> "", so we reproduce
+	// that no-op by tagging only when a tag actually exists. (audio_tag has a
+	// non-null default, so audio albums are always tagged, matching Python.)
+	if tag != "" {
+		type tagTarget struct {
+			idx int
+			msg *gotgbot.Message
 		}
-		return all
-	}
-	var toTag []tagTarget
-	if mt == "photo" || mt == "video" {
-		for i, m := range msgs {
-			if m.OriginalCaptionHTML() != "" {
-				if len(toTag) > 0 {
-					// more than one captioned message -> tag them all.
-					toTag = markAll()
-					break
-				}
-				toTag = append(toTag, tagTarget{idx: i, msg: m})
+		markAll := func() []tagTarget {
+			all := make([]tagTarget, 0, len(msgs))
+			for i, m := range msgs {
+				all = append(all, tagTarget{idx: i, msg: m})
 			}
+			return all
 		}
-		if len(toTag) == 0 {
-			toTag = append(toTag, tagTarget{idx: 0, msg: msgs[0]})
+		var toTag []tagTarget
+		if mt == "photo" || mt == "video" {
+			for i, m := range msgs {
+				if m.OriginalCaptionHTML() != "" {
+					if len(toTag) > 0 {
+						// more than one captioned message -> tag them all.
+						toTag = markAll()
+						break
+					}
+					toTag = append(toTag, tagTarget{idx: i, msg: m})
+				}
+			}
+			if len(toTag) == 0 {
+				toTag = append(toTag, tagTarget{idx: 0, msg: msgs[0]})
+			}
+		} else {
+			toTag = markAll()
 		}
-	} else {
-		toTag = markAll()
-	}
-	for _, tt := range toTag {
-		if tt.idx < len(ud.d.sentMedias) {
-			copiedID, _ := strconv.ParseInt(ud.d.sentMedias[tt.idx], 10, 64)
-			b.addTag(tt.msg, "caption", targetID, copiedID, replyMarkup, tag)
+		for _, tt := range toTag {
+			if tt.idx < len(ud.d.sentMedias) {
+				copiedID, _ := strconv.ParseInt(ud.d.sentMedias[tt.idx], 10, 64)
+				b.addTag(tt.msg, "caption", targetID, copiedID, replyMarkup, tag)
+			}
 		}
 	}
 

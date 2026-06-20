@@ -55,10 +55,28 @@ func (b *Bot) setCommands() {
 	slog.Info("successfully set the commands")
 }
 
-// checkConnectionLoop ports jobs.check_connection (run_repeating hourly): a
-// lightweight DB ping. pgxpool reconnects on its own, so this is just a probe +
-// log, replacing Python's manual reconnect dance.
+// checkConnectionLoop ports jobs.check_connection. Python registered it with
+// run_repeating(check_connection, interval=3600, first=5): an initial probe ~5s
+// after startup (early detection of a bad pool) and hourly thereafter. pgxpool
+// reconnects on its own, so this is just a probe + log, replacing Python's
+// manual reconnect dance.
 func (b *Bot) checkConnectionLoop(ctx context.Context) {
+	check := func() {
+		c, cancel := context.WithTimeout(ctx, dbOpTimeout)
+		defer cancel()
+		if _, err := b.DB.UserCount(c); err != nil {
+			slog.Error("error while checking connection", "err", err)
+		}
+	}
+
+	// initial probe ~5s after startup (Python's `first=5`).
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(5 * time.Second):
+		check()
+	}
+
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 	for {
@@ -66,11 +84,7 @@ func (b *Bot) checkConnectionLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			c, cancel := context.WithTimeout(ctx, dbOpTimeout)
-			if _, err := b.DB.UserCount(c); err != nil {
-				slog.Error("error while checking connection", "err", err)
-			}
-			cancel()
+			check()
 		}
 	}
 }
