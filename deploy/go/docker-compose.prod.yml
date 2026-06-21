@@ -1,0 +1,80 @@
+# PRODUCTION cutover stack for the Go bot — SHARED DATABASE.
+#
+# The Go bot connects to the EXISTING production Postgres container
+# (telegram-bot-db) — the SAME database the Python bot uses. The schema is
+# identical, so there is NO data migration: existing users/links/settings just
+# work. This file does NOT define a postgres service and does NOT touch the
+# Python stack; cutover is "stop the python container, up this one", and
+# rollback is the reverse. See CUTOVER.md.
+#
+# Before use, fill in:
+#   - deploy/go/.env.prod   : a copy of the PRODUCTION .env (real BOT_TOKEN, DB
+#                             creds for telegram-bot-db, ADMINS, chats, etc.)
+#   - networks.prod.name    : the docker network telegram-bot-db is attached to
+#                             (find it — see CUTOVER.md pre-flight step 2)
+#
+# Run with:
+#   docker compose --env-file deploy/go/.env.prod -p chevalet-go-prod \
+#     -f deploy/go/docker-compose.prod.yml up -d --build
+
+services:
+  go-bot:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: chevalet-go-bot:prod
+    container_name: chevalet-go-bot-prod
+    restart: unless-stopped
+    init: true
+    environment:
+      # DB_HOST is pinned to the existing production Postgres container name.
+      - DB_HOST=telegram-bot-db
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - PROXY=${PROXY}
+      - REPORT_CHAT_ID=${REPORT_CHAT_ID}
+      - ERROR_CHAT_ID=${ERROR_CHAT_ID}
+      - ADMINS=${ADMINS}
+      - SELLER_ADMIN=${SELLER_ADMIN}
+      - SUPPORT_ADMIN=${SUPPORT_ADMIN}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - MAX_NAME_LENGTH=${MAX_NAME_LENGTH}
+      - DEFAULT_CID_LIMIT=${DEFAULT_CID_LIMIT}
+      - MAX_CID_LENGTH=${MAX_CID_LENGTH}
+      - MIN_CID_LENGTH=${MIN_CID_LENGTH}
+      - HEALTH_PORT=${HEALTH_PORT}
+      - BOT_HEALTH_PORT=${BOT_HEALTH_PORT}
+      - BASE_ADDRESS=${BASE_ADDRESS}
+      - SEND_GM_GN=${SEND_GM_GN}
+      - GM_TIME=${GM_TIME}
+      - GN_TIME=${GN_TIME}
+      - GM_GROUP_ID=${GM_GROUP_ID}
+      - GM_GROUP_TOPIC_ID=${GM_GROUP_TOPIC_ID}
+      - AI_URL=${AI_URL}
+      - AI_SESSION_ID=${AI_SESSION_ID}
+      - AI_INTERVAL=${AI_INTERVAL}
+      - DONATION_LINK=${DONATION_LINK}
+    volumes:
+      # Reuse the production AI dynamic settings for continuity (admin ai-url /
+      # ai-session). Copy the python bot's file here first (see CUTOVER.md), or
+      # remove this line to start from the .env AI_URL/AI_SESSION_ID defaults.
+      - ./prod-dynamic_settings.json:/app/dynamic_settings.json
+    networks:
+      - prod
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 ${HEALTH_PORT:-12564} || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+networks:
+  prod:
+    external: true
+    # The network telegram-bot-db is on. Verify with the command in CUTOVER.md;
+    # for a compose project in /home/hamid/chevaletbot it is typically
+    # "chevaletbot_default".
+    name: chevaletbot_default
