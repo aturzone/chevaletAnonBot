@@ -112,7 +112,11 @@ func (b *Bot) handleErr(tg *gotgbot.Bot, ctx *ext.Context, err error) error {
 		if ctx.EffectiveMessage != nil {
 			_, _ = ctx.EffectiveMessage.Reply(tg, txtDBProblem, nil)
 		}
-		b.reportToErrorChat(tg, "PostgreSQL ERROR: "+err.Error())
+		// Throttle the channel report (coalesce a DB-outage flood); the per-update
+		// user reply above is unaffected.
+		if b.allowDBErrReport() {
+			b.reportToErrorChat(tg, "PostgreSQL ERROR: "+err.Error())
+		}
 		return nil
 	case isNetworkError(err):
 		if ctx.EffectiveMessage != nil {

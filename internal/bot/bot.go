@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"runtime/debug"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
@@ -43,6 +44,26 @@ type Bot struct {
 	aiQueue    *aiQueue
 	admins     map[string]bool
 	errReports *errReportStore
+
+	// dbErrMu/lastDBErr throttle the "PostgreSQL ERROR" reports to ERROR_CHAT_ID:
+	// during a brief DB outage every one of (10k users × concurrent) updates hits
+	// the error path, and an unthrottled flood can itself trip Telegram 429s at
+	// the worst possible moment.
+	dbErrMu   sync.Mutex
+	lastDBErr time.Time
+}
+
+// allowDBErrReport reports true at most once per 30s, so DB-outage error reports
+// to ERROR_CHAT_ID are coalesced instead of flooding.
+func (b *Bot) allowDBErrReport() bool {
+	b.dbErrMu.Lock()
+	defer b.dbErrMu.Unlock()
+	now := time.Now()
+	if !b.lastDBErr.IsZero() && now.Sub(b.lastDBErr) < 30*time.Second {
+		return false
+	}
+	b.lastDBErr = now
+	return true
 }
 
 // New builds the Telegram bot, dispatcher and updater, and registers handlers.

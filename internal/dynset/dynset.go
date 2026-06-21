@@ -60,7 +60,7 @@ func (s *Settings) save() {
 		slog.Error("dynset: failed to marshal", "err", err)
 		return
 	}
-	if err := os.WriteFile(s.path, b, 0o644); err != nil {
+	if err := os.WriteFile(s.path, b, 0o600); err != nil {
 		slog.Error("dynset: failed to save", "err", err)
 		return
 	}

@@ -270,6 +270,7 @@ func (b *Bot) adminReport(ctx *ext.Context, dbctx context.Context, text []string
 					if e := b.replyText(ctx, joined); e != nil {
 						return e
 					}
+					parts = nil // reset after flushing so chunks aren't re-sent
 				}
 				parts = append(parts, fmt.Sprintf("%s (%d)", key, val))
 			}

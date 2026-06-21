@@ -278,7 +278,7 @@ func (b *Bot) sendMassMsg(msg *gotgbot.Message) {
 
 	if len(failures) > 0 {
 		const logfile = "mass-msg-failurs.txt" // (sic) matches the Python filename
-		if werr := os.WriteFile(logfile, []byte(strings.Join(failures, "\n")), 0o644); werr == nil {
+		if werr := os.WriteFile(logfile, []byte(strings.Join(failures, "\n")), 0o600); werr == nil {
 			if f, oerr := os.Open(logfile); oerr == nil {
 				_, _ = msg.ReplyDocument(b.TG, gotgbot.InputFileByReader(logfile, f), nil)
 				f.Close()

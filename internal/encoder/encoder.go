@@ -19,7 +19,8 @@
 package encoder
 
 import (
-	"math/rand/v2"
+	crand "crypto/rand"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +56,25 @@ func indexOfAllowed(b byte) int {
 	return strings.IndexByte(allowedCIDChars, b)
 }
 
+// randN returns a uniform random int in [0, n) from a cryptographically secure
+// source. ids generated here (cids = anonymous links, chevaletids, report and
+// error tracking codes) must not be predictable/enumerable, so we use
+// crypto/rand instead of math/rand. crypto/rand never fails on a running OS; if
+// it ever did we degrade to a time-based value rather than crash the send path.
+func randN(n int) int {
+	if n <= 1 {
+		return 0
+	}
+	if v, err := crand.Int(crand.Reader, big.NewInt(int64(n))); err == nil {
+		return int(v.Int64())
+	}
+	f := time.Now().UnixNano() % int64(n)
+	if f < 0 {
+		f += int64(n)
+	}
+	return int(f)
+}
+
 func isASCIIDigit(b byte) bool { return b >= '0' && b <= '9' }
 
 func allASCIIDigits(s string) bool {
@@ -74,7 +94,7 @@ func allASCIIDigits(s string) bool {
 // ord(letter)+key) so DecodeChevaletID can recover the key. Mirrors the Python
 // encode_chevaletid.
 func EncodeChevaletID(chevaletid string) string {
-	key := rand.IntN(keyMaxInt + 1) // inclusive [0, 100], matching random.randint
+	key := randN(keyMaxInt + 1) // inclusive [0, 100], matching random.randint
 
 	var sb strings.Builder
 	sb.Grow(len(chevaletid) + 4)
@@ -90,7 +110,7 @@ func EncodeChevaletID(chevaletid string) string {
 		sb.WriteByte(allowedCIDChars[(idx+key)%allowedLen])
 	}
 
-	patch := patchLetters[rand.IntN(len(patchLetters))]
+	patch := patchLetters[randN(len(patchLetters))]
 	sb.WriteByte(patch)
 	sb.WriteString(strconv.Itoa(int(patch) + key))
 	return sb.String()
@@ -166,10 +186,10 @@ func GenerateCID(suidLength int) string {
 	var sb strings.Builder
 	sb.Grow(suidLength + 2)
 	for i := 0; i < suidLength; i++ {
-		sb.WriteByte(shortUUIDAlphabet[rand.IntN(len(shortUUIDAlphabet))])
+		sb.WriteByte(shortUUIDAlphabet[randN(len(shortUUIDAlphabet))])
 	}
-	sb.WriteByte(lowercaseLetters[rand.IntN(len(lowercaseLetters))])
-	sb.WriteByte(lowercaseLetters[rand.IntN(len(lowercaseLetters))])
+	sb.WriteByte(lowercaseLetters[randN(len(lowercaseLetters))])
+	sb.WriteByte(lowercaseLetters[randN(len(lowercaseLetters))])
 	return sb.String()
 }
 

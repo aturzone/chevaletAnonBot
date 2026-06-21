@@ -14,13 +14,23 @@ type aiQueue struct {
 	items []*gotgbot.Message
 }
 
+// aiQueueMax bounds the in-memory queue so a slow/down AI endpoint (or a flood
+// of GM-group replies-to-bot) can't grow it without limit. Excess is dropped —
+// the AI reply is best-effort.
+const aiQueueMax = 500
+
 func newAIQueue() *aiQueue { return &aiQueue{} }
 
-// add appends a message (add_to_queue).
-func (q *aiQueue) add(m *gotgbot.Message) {
+// add appends a message (add_to_queue); it drops the message (returns false)
+// when the queue is at capacity.
+func (q *aiQueue) add(m *gotgbot.Message) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if len(q.items) >= aiQueueMax {
+		return false
+	}
 	q.items = append(q.items, m)
+	return true
 }
 
 // popFront removes and returns the first queued message (queue[0] +
