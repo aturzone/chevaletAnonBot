@@ -26,14 +26,16 @@ import (
 // proxy — Python used requests directly).
 var aiHTTP = &http.Client{Timeout: 60 * time.Second}
 
-// startBackground launches the background goroutines; they stop when ctx is done.
+// startBackground launches the background goroutines as TRACKED work (so Run can
+// drain them on shutdown); they stop when ctx is done.
 func (b *Bot) startBackground(ctx context.Context) {
 	b.setCommands()
-	go b.aiResponderLoop(ctx)
-	go b.checkConnectionLoop(ctx)
+	b.goBG(func() { b.aiResponderLoop(ctx) })
+	b.goBG(func() { b.checkConnectionLoop(ctx) })
+	b.goBG(func() { b.userStoreSweepLoop(ctx) })
 	if b.Cfg.SendGMGN {
-		go b.gmgnLoop(ctx, b.Cfg.GMTime, true)  // morning
-		go b.gmgnLoop(ctx, b.Cfg.GNTime, false) // night
+		b.goBG(func() { b.gmgnLoop(ctx, b.Cfg.GMTime, true) })  // morning
+		b.goBG(func() { b.gmgnLoop(ctx, b.Cfg.GNTime, false) }) // night
 	}
 }
 
@@ -85,6 +87,24 @@ func (b *Bot) checkConnectionLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			check()
+		}
+	}
+}
+
+// userStoreSweepLoop periodically evicts long-idle per-user state so the
+// in-memory userStore (and the rate-limit timestamps it holds) can't grow
+// without bound under a large or hostile user population.
+func (b *Bot) userStoreSweepLoop(ctx context.Context) {
+	t := time.NewTicker(30 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if n := b.users.sweep(2 * time.Hour); n > 0 {
+				slog.Debug("evicted idle user states", "count", n)
+			}
 		}
 	}
 }
@@ -241,22 +261,32 @@ func stripFormatChars(s string) string {
 	return sb.String()
 }
 
-// scheduleMassMsg ports the admin send-mass-msg trigger (run_once 7s later).
+// scheduleMassMsg ports the admin send-mass-msg trigger (run_once 7s later). The
+// wait is a TRACKED, ctx-aware background goroutine (replaces a bare
+// time.AfterFunc) so a shutdown during the 7s window cancels it cleanly.
 func (b *Bot) scheduleMassMsg(ctx *ext.Context) {
 	msg := ctx.EffectiveMessage
-	time.AfterFunc(7*time.Second, func() { b.sendMassMsg(msg) })
+	b.goBG(func() {
+		select {
+		case <-time.After(7 * time.Second):
+			b.sendMassMsg(msg)
+		case <-b.runCtx.Done():
+		}
+	})
 }
 
 // sendMassMsg ports jobs.send_mass_msg: copy the replied message to every user,
-// logging failures to a file that is then sent back to the admin. No rate
-// limiting, matching the Python original.
+// logging failures to a file that is then sent back to the admin. It derives its
+// context from the run context and stops cleanly mid-broadcast on shutdown (so it
+// never touches a closed DB pool); a truncated broadcast is logged.
 func (b *Bot) sendMassMsg(msg *gotgbot.Message) {
 	if msg.ReplyToMessage == nil {
 		return
 	}
+	rctx := b.runCtx
 	_, _ = msg.Reply(b.TG, "starting to send mass msg...", nil)
 
-	dbctx, cancel := context.WithTimeout(context.Background(), dbOpTimeout)
+	dbctx, cancel := context.WithTimeout(rctx, dbOpTimeout)
 	uids, err := b.DB.GetAllUIDs(dbctx)
 	cancel()
 	if err != nil {
@@ -265,7 +295,13 @@ func (b *Bot) sendMassMsg(msg *gotgbot.Message) {
 	}
 
 	var failures []string
-	for _, uid := range uids {
+	for i, uid := range uids {
+		select {
+		case <-rctx.Done():
+			slog.Warn("mass msg interrupted by shutdown", "sent", i, "total", len(uids))
+			return
+		default:
+		}
 		tid, perr := strconv.ParseInt(uid, 10, 64)
 		if perr != nil {
 			failures = append(failures, fmt.Sprintf("%s | %v", uid, perr))

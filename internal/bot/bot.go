@@ -51,6 +51,33 @@ type Bot struct {
 	// the worst possible moment.
 	dbErrMu   sync.Mutex
 	lastDBErr time.Time
+
+	// bgWG tracks background goroutines (AI loop, GM/GN, an in-flight mass-msg) so
+	// Run can drain them on shutdown before the DB pool is closed; runCtx is the
+	// run-scoped context they derive from.
+	bgWG   sync.WaitGroup
+	runCtx context.Context
+}
+
+// goBG runs fn as a tracked background goroutine, awaited by Run on shutdown.
+func (b *Bot) goBG(fn func()) {
+	b.bgWG.Add(1)
+	go func() {
+		defer b.bgWG.Done()
+		fn()
+	}()
+}
+
+// waitBackground waits for tracked background work to finish, bounded by timeout
+// so a long mass-broadcast can't hang shutdown indefinitely.
+func (b *Bot) waitBackground(timeout time.Duration) {
+	done := make(chan struct{})
+	go func() { b.bgWG.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		slog.Warn("background work didn't finish within the shutdown grace period")
+	}
 }
 
 // allowDBErrReport reports true at most once per 30s, so DB-outage error reports
@@ -116,6 +143,7 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 
 // Run starts long polling and blocks until ctx is cancelled, then stops cleanly.
 func (b *Bot) Run(ctx context.Context) error {
+	b.runCtx = ctx
 	if err := b.Updater.StartPolling(b.TG, &ext.PollingOpts{
 		GetUpdatesOpts: &gotgbot.GetUpdatesOpts{
 			// Set AllowedUpdates EXPLICITLY. Telegram remembers the last
@@ -142,7 +170,11 @@ func (b *Bot) Run(ctx context.Context) error {
 
 	<-ctx.Done()
 	slog.Info("stopping updater")
-	return b.Updater.Stop()
+	err := b.Updater.Stop()
+	// Drain tracked background work before main closes the DB pool, so nothing
+	// uses a closed pool (bounded — see waitBackground).
+	b.waitBackground(10 * time.Second)
+	return err
 }
 
 // isAdmin reports whether a uid is in the configured ADMINS list.

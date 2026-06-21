@@ -22,6 +22,45 @@ import (
 type userData struct {
 	mu sync.Mutex
 	d  convData
+
+	// sendTimes: unix-nano timestamps of this user's recent anonymous sends, for
+	// the outbound rate limit. Deliberately NOT part of convData, so clear()/
+	// /cancel can't reset it (a flooder mustn't dodge the limit by cancelling).
+	// Guarded by mu (prep holds it for the whole handler).
+	sendTimes []int64
+
+	// lastAccess: when this entry was last fetched. The userStore sweep evicts
+	// long-idle entries to bound memory under a large/hostile population.
+	// Guarded by the userStore mutex (set in get, read in sweep).
+	lastAccess time.Time
+}
+
+// sendRateMax / sendRateWindow bound one user's anonymous sends. Generous by
+// design — a human composing distinct messages never approaches 40/min, but it
+// caps an automated flood (the anonymous-harassment amplifier). The Python
+// original had no limit.
+const (
+	sendRateMax    = 40
+	sendRateWindow = time.Minute
+)
+
+// allowSend reports whether this user may send another anonymous message now
+// (sliding window). The caller holds u.mu (prep does).
+func (u *userData) allowSend() bool {
+	now := time.Now().UnixNano()
+	cutoff := now - int64(sendRateWindow)
+	kept := u.sendTimes[:0]
+	for _, t := range u.sendTimes {
+		if t >= cutoff {
+			kept = append(kept, t)
+		}
+	}
+	u.sendTimes = kept
+	if len(kept) >= sendRateMax {
+		return false
+	}
+	u.sendTimes = append(u.sendTimes, now)
+	return true
 }
 
 // convData holds exactly the keys the Python handlers stored in user_data.
@@ -78,7 +117,29 @@ func (s *userStore) get(uid int64) *userData {
 		ud = &userData{}
 		s.m[uid] = ud
 	}
+	ud.lastAccess = time.Now()
 	return ud
+}
+
+// sweep evicts entries idle longer than idle that aren't currently in use (a
+// successful TryLock proves no handler holds them), bounding memory under a
+// large or hostile user population. Returns how many were evicted.
+func (s *userStore) sweep(idle time.Duration) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cutoff := time.Now().Add(-idle)
+	n := 0
+	for uid, ud := range s.m {
+		if ud.lastAccess.After(cutoff) {
+			continue
+		}
+		if ud.mu.TryLock() {
+			delete(s.m, uid)
+			ud.mu.Unlock()
+			n++
+		}
+	}
+	return n
 }
 
 // ud returns the locked-by-prep userData for the effective user of this update.

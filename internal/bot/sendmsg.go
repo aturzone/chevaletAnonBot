@@ -72,6 +72,15 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 	msg := ctx.EffectiveMessage
 	ud := b.ud(ctx)
 
+	// Outbound rate limit (generous): caps an automated anonymous-message flood
+	// without affecting a human composing messages. The send is dropped and the
+	// user is told to slow down; END the compose (no partial send).
+	if !ud.allowSend() {
+		_ = b.replyText(ctx, txtTooFast)
+		ud.clear()
+		return delNone, nil
+	}
+
 	targetChidPlain, _ := encoder.DecodeChevaletID(ud.d.targetChid)
 	targetCid := ud.d.targetCid
 	targetMid := ud.d.replyTo

@@ -88,6 +88,9 @@ const (
 	// unblock-me-again button on /start UNBLOCK reply
 	btnBlockAgain = "پشیمون شدم دوباره بلاکش کن خخ"
 
+	// outbound rate limit (Go-only hardening; generous threshold, see allowSend)
+	txtTooFast = "یه کم آروم‌تر! بیش از حد پیام فرستادی، چند لحظه صبر کن و دوباره امتحان کن."
+
 	// prep / @prep_function (decorators.py)
 	txtInitNoCID      = "مشکلی در ساخت لینک ناشناس بوجود اومد. دوباره تلاش کن و اگه موفق نشدی، قبل از استفاده از بات با پشتیبانی تماس بگیر"
 	txtDBProblem      = "مشکلی برای دیتابیس به وجود آمده. به پشتیبانی خبردادیم، لطفا صبر کنید و دوباره تلاش کنید"
