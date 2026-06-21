@@ -134,6 +134,15 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 	b.Dispatcher = ext.NewDispatcher(&ext.DispatcherOpts{
 		Error: b.onError,
 		Panic: b.onPanic,
+		// Process updates strictly sequentially and IN ORDER (limiter of 1,
+		// acquired before each goroutine is spawned). This matches the Python
+		// bot's PTB default (concurrent_updates=False) that the conversation FSM
+		// and media-group/album state machine were designed around: gotgbot's
+		// default 50-way concurrent dispatch would otherwise let two updates from
+		// the SAME user race the conversation-state read and the media-group
+		// stash (e.g. a second album item re-entering the send path and clearing
+		// the group → lost album). Background jobs stay concurrent.
+		MaxRoutines: 1,
 	})
 	b.Updater = ext.NewUpdater(b.Dispatcher, &ext.UpdaterOpts{})
 

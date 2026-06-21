@@ -24,9 +24,9 @@ var aTagRe = regexp.MustCompile(`(?i)</?a\b[^>]*>`)
 // names/tags (and the DB is never modified), but injected links can't render in
 // the bot's messages to others.
 func sanitizeUserHTML(s string) string {
-	if !strings.Contains(s, "<a") && !strings.Contains(s, "<A") {
-		return s // fast path: no anchor to strip
-	}
+	// Always run the regex (it returns the input unchanged when there's no match)
+	// — a fast-path substring check for "<a" would miss a lone "</a>". The cost is
+	// negligible on the short name/tag strings this is called with.
 	return aTagRe.ReplaceAllString(s, "")
 }
 

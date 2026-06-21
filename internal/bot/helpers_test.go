@@ -19,6 +19,8 @@ func TestSanitizeUserHTML(t *testing.T) {
 		// a LITERAL "<a>" typed by the user is &lt;-escaped by OriginalHTML, so it
 		// is NOT a real tag and must be left intact
 		{"&lt;a&gt;", "&lt;a&gt;"},
+		// a lone closing tag must also be stripped (no fast-path bypass)
+		{"x </a> y", "x  y"},
 	}
 	for _, c := range cases {
 		if got := sanitizeUserHTML(c.in); got != c.want {
