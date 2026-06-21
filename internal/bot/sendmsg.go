@@ -286,10 +286,11 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		b.addTag(msg, "caption", targetID, copiedID, replyMarkup, audioTag+"\n"+repliedToLink)
+		b.addTag(msg, "caption", targetID, copiedID, replyMarkup, sanitizeUserHTML(audioTag)+"\n"+repliedToLink)
 	case customTag != "":
-		if !b.addTag(msg, "text", targetID, copiedID, replyMarkup, customTag+"\n"+repliedToLink) {
-			b.addTag(msg, "caption", targetID, copiedID, replyMarkup, customTag+"\n"+repliedToLink)
+		ct := sanitizeUserHTML(customTag)
+		if !b.addTag(msg, "text", targetID, copiedID, replyMarkup, ct+"\n"+repliedToLink) {
+			b.addTag(msg, "caption", targetID, copiedID, replyMarkup, ct+"\n"+repliedToLink)
 		}
 	case repliedToLink != "":
 		if !b.addTag(msg, "text", targetID, copiedID, replyMarkup, repliedToLink) {
@@ -365,9 +366,10 @@ func (b *Bot) warningHandle(ctx *ext.Context, wasChannelReply bool, targetUID, u
 		if err != nil {
 			return nil, err
 		}
-		// html.escape on the bug text is a no-op (it has no & < > " '), so we
-		// embed it verbatim. The name is NOT escaped, matching the original.
-		sentText = fmt.Sprintf("فرستادم به %s.\n<blockquote><b>%s</b></blockquote>\n", name, txtWarnBugInner)
+		// The bug text is a trusted constant. The display name is user-controlled,
+		// so strip injected <a> links from it before embedding it (HTML parse mode)
+		// — keeps the name + safe formatting, kills the phishing vector.
+		sentText = fmt.Sprintf("فرستادم به %s.\n<blockquote><b>%s</b></blockquote>\n", sanitizeUserHTML(name), txtWarnBugInner)
 	} else {
 		sentText = txtSentToThem
 	}

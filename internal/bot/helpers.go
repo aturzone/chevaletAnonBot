@@ -2,11 +2,33 @@ package bot
 
 import (
 	"context"
+	"regexp"
 	"strings"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 )
+
+// aTagRe matches an HTML <a ...> or </a> tag. User display names and custom/
+// audio tags are stored as the HTML rendered from the sender's Telegram message
+// entities, so they can legitimately contain safe formatting (<b>, <i>, …) — but
+// a `text_link` entity becomes <a href="…">, which, when embedded UNescaped into
+// the bot's own (trusted, ParseMode=HTML) messages shown to OTHER users, is a
+// phishing/tracking primitive. The HTML is always well-formed (entity-generated,
+// and literal '<' in the user's text is escaped to &lt;), so the only dangerous
+// element is the anchor.
+var aTagRe = regexp.MustCompile(`(?i)</?a\b[^>]*>`)
+
+// sanitizeUserHTML neutralizes anchor tags in a user-controlled name/tag while
+// preserving its visible text and all safe formatting — so users keep their
+// names/tags (and the DB is never modified), but injected links can't render in
+// the bot's messages to others.
+func sanitizeUserHTML(s string) string {
+	if !strings.Contains(s, "<a") && !strings.Contains(s, "<A") {
+		return s // fast path: no anchor to strip
+	}
+	return aTagRe.ReplaceAllString(s, "")
+}
 
 // bg returns a background context bounded by dbOpTimeout, for a handler's
 // database work. Handlers call it for short-lived query groups.

@@ -152,7 +152,7 @@ func (b *Bot) startConnect(tg *gotgbot.Bot, ctx *ext.Context, userid, targetCid 
 	if targetUID == userid {
 		selfPrefix = txtConnectSelf
 	}
-	text := selfPrefix + "\nبه " + name + " وصل شدی. پیامتو بفرست\n\n" + txtConnectBody
+	text := selfPrefix + "\nبه " + sanitizeUserHTML(name) + " وصل شدی. پیامتو بفرست\n\n" + txtConnectBody
 	if _, err := msg.Reply(tg, text, &gotgbot.SendMessageOpts{
 		ParseMode:   "HTML",
 		ReplyMarkup: *cancelMarkup(),

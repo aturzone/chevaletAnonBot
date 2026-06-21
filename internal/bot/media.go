@@ -149,7 +149,7 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 		for _, tt := range toTag {
 			if tt.idx < len(ud.d.sentMedias) {
 				copiedID, _ := strconv.ParseInt(ud.d.sentMedias[tt.idx], 10, 64)
-				b.addTag(tt.msg, "caption", targetID, copiedID, replyMarkup, tag)
+				b.addTag(tt.msg, "caption", targetID, copiedID, replyMarkup, sanitizeUserHTML(tag))
 			}
 		}
 	}
