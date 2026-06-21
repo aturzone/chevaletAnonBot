@@ -25,6 +25,11 @@ import (
 func (b *Bot) registerHandlers() {
 	d := b.Dispatcher
 
+	// errmore_handler — the "more" button on error reports in ERROR_CHAT_ID.
+	// Registered OUTSIDE prep (it lives in a group, not a private chat) and before
+	// the conversation so it is never shadowed.
+	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("errmore|"), b.errMore))
+
 	// no_callback_handler — answers the spacer / "sent with link" buttons.
 	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("no-callback"), b.topLevel(noCallback)))
 

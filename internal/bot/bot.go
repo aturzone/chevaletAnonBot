@@ -38,9 +38,10 @@ type Bot struct {
 	Texts *texts.Loader
 	Dyn   *dynset.Settings
 
-	users   *userStore
-	aiQueue *aiQueue
-	admins  map[string]bool
+	users      *userStore
+	aiQueue    *aiQueue
+	admins     map[string]bool
+	errReports *errReportStore
 }
 
 // New builds the Telegram bot, dispatcher and updater, and registers handlers.
@@ -67,14 +68,15 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 	}
 
 	b := &Bot{
-		TG:      tg,
-		DB:      database,
-		Cfg:     cfg,
-		Texts:   txt,
-		Dyn:     dynset.New("dynamic_settings.json", cfg.AIURL, cfg.AISessionID),
-		users:   newUserStore(),
-		aiQueue: newAIQueue(),
-		admins:  make(map[string]bool, len(cfg.Admins)),
+		TG:         tg,
+		DB:         database,
+		Cfg:        cfg,
+		Texts:      txt,
+		Dyn:        dynset.New("dynamic_settings.json", cfg.AIURL, cfg.AISessionID),
+		users:      newUserStore(),
+		aiQueue:    newAIQueue(),
+		admins:     make(map[string]bool, len(cfg.Admins)),
+		errReports: newErrReportStore(50),
 	}
 	for _, a := range cfg.Admins {
 		b.admins[a] = true
@@ -120,41 +122,46 @@ func (b *Bot) isAdmin(uid string) bool { return b.admins[uid] }
 // modules/Global/error_handler.py: it logs, sends a diagnostic report to
 // ERROR_CHAT_ID, and replies to the user with a tracking code.
 //
-// The report reproduces the Python error_handler's shape as closely as Go
-// allows: a header with the tracking code and the error, followed by the
-// triggering update dumped as pretty-printed JSON and split into <pre> chunks
-// under Telegram's message-length limit. (A Go error carries no stack trace at
-// this point — unlike a Python exception's __traceback__ — so the error string
-// stands in for the traceback and the update dump is the primary diagnostic.)
+// To keep the error channel readable, the report is sent as a compact SUMMARY
+// (the tracking code + the error) with a "🔎 more" button; the full detail — the
+// triggering update dumped as pretty-printed JSON, paged into <pre> blocks under
+// Telegram's length limit — is revealed one page at a time on demand by errMore,
+// not dumped all at once. The complete detail is ALSO written to the process
+// logs, so it survives even after the in-memory pages are evicted. (A Go error
+// carries no stack trace here — unlike a Python exception's __traceback__ — so
+// the error string stands in for the traceback and the update dump is the
+// primary diagnostic.)
 func (b *Bot) onError(tg *gotgbot.Bot, ctx *ext.Context, err error) ext.DispatcherAction {
 	code := encoder.GenerateCID(8)
-	slog.Error("handler error", "code", code, "err", err)
+
+	// Build the update dump once; it goes both to the logs and to the paged report.
+	var updateJSON string
+	if ctx != nil && ctx.Update != nil {
+		if raw, jerr := json.MarshalIndent(ctx.Update, "", "  "); jerr == nil {
+			updateJSON = string(raw)
+		}
+	}
+	slog.Error("handler error", "code", code, "err", err, "update", updateJSON)
 
 	if b.Cfg.ErrorChatID != "" {
 		if chatID, perr := strconv.ParseInt(b.Cfg.ErrorChatID, 10, 64); perr == nil {
-			header := fmt.Sprintf(
-				"An exception was raised while handling an update\n"+
-					"Error code: <code>%s</code>\n\n<pre>%s</pre>",
-				code, html.EscapeString(fmt.Sprintf("%v", err)),
-			)
-			hdr, _ := tg.SendMessage(chatID, header, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
-
-			if ctx != nil && ctx.Update != nil {
-				if raw, jerr := json.MarshalIndent(ctx.Update, "", "  "); jerr == nil {
-					var replyTo *gotgbot.ReplyParameters
-					if hdr != nil {
-						replyTo = &gotgbot.ReplyParameters{MessageId: hdr.MessageId, AllowSendingWithoutReply: true}
-					}
-					// 4050 chars, less the surrounding <pre></pre>, matching the
-					// Python chunker; chunkString splits on rune boundaries so a
-					// multi-byte character is never cut in half.
-					const maxChunk = 4050 - len("<pre></pre>")
-					for _, chunk := range chunkString(html.EscapeString(string(raw)), maxChunk) {
-						_, _ = tg.SendMessage(chatID, "<pre>"+chunk+"</pre>",
-							&gotgbot.SendMessageOpts{ParseMode: "HTML", ReplyParameters: replyTo})
-					}
-				}
+			// Page the update dump (escaped) so each page fits in one message under
+			// the <pre></pre> wrapper; split on rune boundaries so a multi-byte
+			// character is never cut in half.
+			var pages []string
+			if updateJSON != "" {
+				pages = chunkString(html.EscapeString(updateJSON), 3500)
 			}
+			b.errReports.put(code, pages)
+
+			summary := fmt.Sprintf("⚠️ <b>خطایی هنگام پردازش یک آپدیت رخ داد</b>\nکد پیگیری: <code>%s</code>\n\n<pre>%s</pre>",
+				code, html.EscapeString(truncate(fmt.Sprintf("%v", err), 600)))
+			opts := &gotgbot.SendMessageOpts{ParseMode: "HTML"}
+			if len(pages) > 0 {
+				m := moreButton(code, 0, len(pages))
+				opts.ReplyMarkup = m
+			}
+			_, _ = tg.SendMessage(chatID, summary, opts)
 		}
 	}
 	if ctx.EffectiveMessage != nil {

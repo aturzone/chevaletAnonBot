@@ -98,6 +98,15 @@ func chunkString(s string, size int) []string {
 	return out
 }
 
+// truncate shortens s to at most max runes, appending an ellipsis when cut.
+func truncate(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
 // equalStringSlices reports whether two string slices are element-wise equal.
 func equalStringSlices(a, b []string) bool {
 	if len(a) != len(b) {
