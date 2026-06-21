@@ -75,9 +75,11 @@ services:
     networks:
       - bot-network
     healthcheck:
-      # The Go bot opens a TCP health listener on HEALTH_PORT; nc (busybox) ships
-      # in the alpine runtime image.
-      test: ["CMD-SHELL", "nc -z localhost ${HEALTH_PORT} || exit 1"]
+      # The Go bot opens a TCP health listener on 127.0.0.1:HEALTH_PORT; nc
+      # (busybox) ships in the alpine runtime image. Use an explicit 127.0.0.1
+      # (not "localhost", which may resolve to ::1 first and miss the IPv4-only
+      # listener).
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 ${HEALTH_PORT} || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
