@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -24,6 +25,8 @@ const (
 // otherMessagesTemplate mirrors handler_templates.other_messages_template: the
 // "didn't understand" reply, quoting the triggering message.
 func (b *Bot) otherMessagesTemplate(ctx *ext.Context) error {
+	slog.Info("message not understood (catch-all)", "kind", kindOf(ctx.EffectiveMessage),
+		"groupId", ctx.EffectiveMessage.MediaGroupId, "isReply", ctx.EffectiveMessage.ReplyToMessage != nil)
 	return b.replyText(ctx, txtNotUnderstood)
 }
 

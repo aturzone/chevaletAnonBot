@@ -2,6 +2,7 @@ package bot
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -76,6 +77,7 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 	// without affecting a human composing messages. The send is dropped and the
 	// user is told to slow down; END the compose (no partial send).
 	if !ud.allowSend() {
+		slog.Info("send dropped: rate-limited", "userid", userid, "kind", kindOf(msg))
 		_ = b.replyText(ctx, txtTooFast)
 		ud.clear()
 		return delNone, nil
@@ -87,6 +89,8 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 	wasChannelReply := ud.d.channelReply
 	externalReply := msg.ExternalReply
 	mediaGroupID := msg.MediaGroupId
+	slog.Info("send attempt", "kind", kindOf(msg), "group", mediaGroupID != "",
+		"answer", targetMid != "", "channelReply", wasChannelReply)
 	ud.clear()
 
 	dbctx, cancel := b.bg()

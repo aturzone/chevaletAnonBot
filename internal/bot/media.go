@@ -20,6 +20,9 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 	msg := ctx.EffectiveMessage
 	ud := b.ud(ctx)
 
+	slog.Info("handleMedia", "kind", kindOf(msg), "groupId", msg.MediaGroupId,
+		"haveGroup", len(ud.d.groupMsgs) > 0, "match", msg.MediaGroupId == ud.d.mediaGroupID)
+
 	// Not part of a tracked group (or a different group) -> treat as a fresh
 	// auto-reply attempt, else "didn't understand".
 	if len(ud.d.groupMsgs) == 0 || msg.MediaGroupId != ud.d.mediaGroupID {
@@ -202,6 +205,32 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 	}
 	ud.d.groupExpiration = nowSeconds() + config.ExpireAfter
 	return nil
+}
+
+// kindOf describes a message's media kind for diagnostic logging.
+func kindOf(m *gotgbot.Message) string {
+	switch {
+	case m.Audio != nil:
+		return "audio"
+	case m.Voice != nil:
+		return "voice"
+	case len(m.Photo) > 0:
+		return "photo"
+	case m.Video != nil:
+		return "video"
+	case m.Document != nil:
+		return "document"
+	case m.Animation != nil:
+		return "animation"
+	case m.VideoNote != nil:
+		return "video_note"
+	case m.Sticker != nil:
+		return "sticker"
+	case m.Text != "":
+		return "text"
+	default:
+		return "other"
+	}
 }
 
 // mediaType returns the bot-relevant message type of m, mirroring the slices of
