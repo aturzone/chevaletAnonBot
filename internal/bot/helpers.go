@@ -36,16 +36,6 @@ func (b *Bot) sendHTMLNoQuote(ctx *ext.Context, text string) error {
 	return err
 }
 
-// htmlOpts builds SendMessageOpts with HTML parse mode and an optional inline
-// keyboard, quoting the triggering message.
-func htmlOpts(markup *gotgbot.InlineKeyboardMarkup) *gotgbot.SendMessageOpts {
-	o := &gotgbot.SendMessageOpts{ParseMode: "HTML"}
-	if markup != nil {
-		o.ReplyMarkup = *markup
-	}
-	return o
-}
-
 // sendPlain sends a plain-text message to the user's chat WITHOUT quoting the
 // triggering message (Python message.reply_text(...) with no reply_parameters).
 func (b *Bot) sendPlain(ctx *ext.Context, text string) error {

@@ -390,7 +390,7 @@ func reportConfirmYes(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) 
 		ReplyParameters: &gotgbot.ReplyParameters{MessageId: firstMessage.MessageId, AllowSendingWithoutReply: true},
 	}); cerr != nil {
 		// Fall back to forwarding the message from the reporter's own chat.
-		var srcMid int64 = msg.MessageId
+		srcMid := msg.MessageId
 		if msg.ReplyToMessage != nil {
 			srcMid = msg.ReplyToMessage.MessageId
 		}

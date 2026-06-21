@@ -85,7 +85,7 @@ func (b *Bot) channelLinkRe() *regexp.Regexp {
 // code did with `match.span(1)` + `text[offset:end]`.
 func findCID(re *regexp.Regexp, original string) (string, bool) {
 	loc := re.FindStringSubmatchIndex(strings.ToLower(original))
-	if loc == nil || len(loc) < 4 || loc[2] < 0 {
+	if len(loc) < 4 || loc[2] < 0 {
 		return "", false
 	}
 	return original[loc[2]:loc[3]], true
@@ -102,7 +102,7 @@ func (b *Bot) findAuthorLink(text, signature string) (string, bool) {
 	re := regexp.MustCompile(`(?i)` + regexp.QuoteMeta(signature) +
 		`\s*:\s*(?:https?://)?t\.me/` + regexp.QuoteMeta(user) + `\?start=([A-Za-z0-9_-]+)`)
 	loc := re.FindStringSubmatchIndex(text)
-	if loc == nil || len(loc) < 4 || loc[2] < 0 {
+	if len(loc) < 4 || loc[2] < 0 {
 		return "", false
 	}
 	return text[loc[2]:loc[3]], true
