@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strconv"
 	"time"
 
@@ -84,6 +85,7 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 
 	b.Dispatcher = ext.NewDispatcher(&ext.DispatcherOpts{
 		Error: b.onError,
+		Panic: b.onPanic,
 	})
 	b.Updater = ext.NewUpdater(b.Dispatcher, &ext.UpdaterOpts{})
 
@@ -150,34 +152,57 @@ func (b *Bot) onError(tg *gotgbot.Bot, ctx *ext.Context, err error) ext.Dispatch
 	}
 	slog.Error("handler error", "code", code, "err", err, "update", updateJSON)
 
+	var pages []string
+	if updateJSON != "" {
+		// Page the update dump (escaped) so each page fits in one message under
+		// the <pre></pre> wrapper; split on rune boundaries so a multi-byte
+		// character is never cut in half.
+		pages = chunkString(html.EscapeString(updateJSON), 3500)
+	}
+	summary := fmt.Sprintf("⚠️ <b>خطایی هنگام پردازش یک آپدیت رخ داد</b>\nکد پیگیری: <code>%s</code>\n\n<pre>%s</pre>",
+		code, html.EscapeString(truncate(fmt.Sprintf("%v", err), 600)))
+	b.reportIncident(tg, ctx, code, summary, pages)
+	return ext.DispatcherActionNoop
+}
+
+// onPanic is the dispatcher panic handler. gotgbot recovers handler panics to
+// keep the single bot process alive, but WITHOUT this hook a recovered panic is
+// only returned to the updater and logged — it never reaches ERROR_CHAT_ID and
+// the user gets no tracking code (worse than the Python error_handler, which
+// reported exceptions). We route it through the same incident report as onError,
+// paging the STACK TRACE (which a plain error doesn't carry).
+func (b *Bot) onPanic(tg *gotgbot.Bot, ctx *ext.Context, r any) {
+	code := encoder.GenerateCID(8)
+	stack := string(debug.Stack())
+	slog.Error("handler panic", "code", code, "panic", fmt.Sprintf("%v", r), "stack", stack)
+
+	pages := chunkString(html.EscapeString(stack), 3500)
+	summary := fmt.Sprintf("🛑 <b>panic هنگام پردازش یک آپدیت</b>\nکد پیگیری: <code>%s</code>\n\n<pre>%s</pre>",
+		code, html.EscapeString(truncate(fmt.Sprintf("%v", r), 600)))
+	b.reportIncident(tg, ctx, code, summary, pages)
+}
+
+// reportIncident files a tracked incident: it stores the detail pages under the
+// tracking code, sends a compact summary to ERROR_CHAT_ID with a "🔎 more" button
+// that pages the detail on demand, and replies to the triggering user with the
+// code. Shared by onError (the update dump) and onPanic (the stack trace).
+func (b *Bot) reportIncident(tg *gotgbot.Bot, ctx *ext.Context, code, summary string, detailPages []string) {
 	if b.Cfg.ErrorChatID != "" {
 		if chatID, perr := strconv.ParseInt(b.Cfg.ErrorChatID, 10, 64); perr == nil {
-			// Page the update dump (escaped) so each page fits in one message under
-			// the <pre></pre> wrapper; split on rune boundaries so a multi-byte
-			// character is never cut in half.
-			var pages []string
-			if updateJSON != "" {
-				pages = chunkString(html.EscapeString(updateJSON), 3500)
-			}
-			b.errReports.put(code, pages)
-
-			summary := fmt.Sprintf("⚠️ <b>خطایی هنگام پردازش یک آپدیت رخ داد</b>\nکد پیگیری: <code>%s</code>\n\n<pre>%s</pre>",
-				code, html.EscapeString(truncate(fmt.Sprintf("%v", err), 600)))
+			b.errReports.put(code, detailPages)
 			opts := &gotgbot.SendMessageOpts{ParseMode: "HTML"}
-			if len(pages) > 0 {
-				m := moreButton(code, 0, len(pages))
-				opts.ReplyMarkup = m
+			if len(detailPages) > 0 {
+				opts.ReplyMarkup = moreButton(code, 0, len(detailPages))
 			}
 			_, _ = tg.SendMessage(chatID, summary, opts)
 		}
 	}
-	if ctx.EffectiveMessage != nil {
+	if ctx != nil && ctx.EffectiveMessage != nil {
 		_, _ = ctx.EffectiveMessage.Reply(tg,
 			fmt.Sprintf("خطایی رخ داد. کد پیگیری: <code>%s</code>", code),
 			&gotgbot.SendMessageOpts{ParseMode: "HTML"},
 		)
 	}
-	return ext.DispatcherActionNoop
 }
 
 // reportToErrorChat sends a plain diagnostic line to ERROR_CHAT_ID, best-effort
