@@ -95,7 +95,14 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 func (b *Bot) Run(ctx context.Context) error {
 	if err := b.Updater.StartPolling(b.TG, &ext.PollingOpts{
 		GetUpdatesOpts: &gotgbot.GetUpdatesOpts{
-			Timeout: 9, // long-poll seconds
+			// Set AllowedUpdates EXPLICITLY. Telegram remembers the last
+			// allowed_updates passed to getUpdates and reuses it whenever the
+			// parameter is omitted; if anything ever called getUpdates with a list
+			// that excluded callback_query, polling without this would silently stop
+			// delivering button presses. Listing exactly what the bot handles makes
+			// it deterministic (and immune to that gotcha).
+			AllowedUpdates: []string{"message", "edited_message", "callback_query"},
+			Timeout:        9, // long-poll seconds
 			RequestOpts: &gotgbot.RequestOpts{
 				Timeout: 11 * time.Second, // slightly above the long-poll timeout
 			},
