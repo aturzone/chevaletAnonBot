@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"log/slog"
 	"sort"
 	"strconv"
 
@@ -102,6 +103,7 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 	for _, sm := range sentMessages {
 		ud.d.sentMedias = append(ud.d.sentMedias, strconv.FormatInt(sm.MessageId, 10))
 	}
+	slog.Info("media group copied to target", "type", mediaType(msgs[0]), "items", len(sentMessages))
 
 	// decide which message(s) to tag and with which tag.
 	mt := mediaType(msgs[0])
