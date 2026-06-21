@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"sort"
 	"strconv"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
@@ -73,7 +74,14 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 	if err != nil {
 		return err
 	}
-	msgs := ud.d.groupMsgs
+	// Album items arrive as separate, concurrently-dispatched updates; prep
+	// serialises them per-user but NOT in message-id order (whichever update grabs
+	// the lock first is appended first), and Telegram may even redeliver one. So
+	// sort + dedupe by message id before copying — tg.CopyMessages REQUIRES the
+	// ids in strictly-increasing order (else "message identifiers must be in a
+	// strictly increasing order").
+	msgs := dedupeSortMsgs(ud.d.groupMsgs)
+	ud.d.groupMsgs = msgs
 	replyMarkup := *ud.d.groupReplyMarkup
 
 	// delete the previously-copied set, then re-copy the whole group.
@@ -221,6 +229,26 @@ func parseIDs(ss []string) ([]int64, bool) {
 		out = append(out, n)
 	}
 	return out, true
+}
+
+// dedupeSortMsgs returns the messages sorted by ascending message id with
+// duplicate ids removed — the order tg.CopyMessages requires. Album items arrive
+// as concurrently-dispatched updates, so the accumulated slice can be unordered
+// or hold a redelivered duplicate.
+func dedupeSortMsgs(in []*gotgbot.Message) []*gotgbot.Message {
+	out := make([]*gotgbot.Message, len(in))
+	copy(out, in)
+	sort.Slice(out, func(i, j int) bool { return out[i].MessageId < out[j].MessageId })
+	dedup := out[:0]
+	last := int64(-1)
+	for _, m := range out {
+		if m.MessageId == last {
+			continue
+		}
+		dedup = append(dedup, m)
+		last = m.MessageId
+	}
+	return dedup
 }
 
 // dedupeOrdered removes duplicates while preserving first-seen order.

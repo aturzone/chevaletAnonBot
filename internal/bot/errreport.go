@@ -129,11 +129,10 @@ func (b *Bot) errMore(tg *gotgbot.Bot, ctx *ext.Context) error {
 		return err
 	}
 
-	// Strip the button from the message just tapped so the same page can't be
-	// revealed twice (best-effort; ignore if the message is too old to edit).
-	if msg != nil {
-		_, _, _ = msg.EditReplyMarkup(tg, &gotgbot.EditMessageReplyMarkupOpts{})
-	}
+	// Intentionally DO NOT strip the tapped button: keep "🔎 more details" on the
+	// report so the error detail can always be re-opened from Telegram and is
+	// never lost after a single tap. (The full detail is also in the logs and in
+	// the bounded in-memory store.)
 	return nil
 }
 
