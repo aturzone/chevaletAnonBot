@@ -178,6 +178,9 @@ func (b *Bot) adminDispatch(tg *gotgbot.Bot, ctx *ext.Context, userid string, te
 		return b.adminReport(ctx, dbctx, text)
 
 	case "ai-url":
+		if !b.Cfg.AIEnabled {
+			return b.replyText(ctx, "AI is disabled (set AI_ENABLED=true to use it).")
+		}
 		sub, err := at(text, 1)
 		if err != nil {
 			return err
@@ -200,6 +203,9 @@ func (b *Bot) adminDispatch(tg *gotgbot.Bot, ctx *ext.Context, userid string, te
 		}
 
 	case "ai-session":
+		if !b.Cfg.AIEnabled {
+			return b.replyText(ctx, "AI is disabled (set AI_ENABLED=true to use it).")
+		}
 		sub, err := at(text, 1)
 		if err != nil {
 			return err

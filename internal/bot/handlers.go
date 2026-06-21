@@ -58,9 +58,12 @@ func (b *Bot) registerHandlers() {
 	b.command("bug", cmdBug)
 
 	// ai_input_message_handler — the GM-group AI input. Registered (like main.py)
-	// just before the catch-all, WITHOUT prep, and only when GM_GROUP_ID is set.
-	if gid, ok := b.gmGroupID(); ok {
-		d.AddHandler(handlers.NewMessage(b.aiInputFilter(gid, botIDInt(b.Cfg.BotID)), b.aiInput))
+	// just before the catch-all, WITHOUT prep, only when the AI feature is enabled
+	// AND GM_GROUP_ID is set. AI is OFF by default (no AI_URL POST surface).
+	if b.Cfg.AIEnabled {
+		if gid, ok := b.gmGroupID(); ok {
+			d.AddHandler(handlers.NewMessage(b.aiInputFilter(gid, botIDInt(b.Cfg.BotID)), b.aiInput))
+		}
 	}
 
 	// other_messages_handler — the catch-all, registered LAST so the conversations

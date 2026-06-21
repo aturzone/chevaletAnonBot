@@ -30,7 +30,9 @@ var aiHTTP = &http.Client{Timeout: 60 * time.Second}
 // drain them on shutdown); they stop when ctx is done.
 func (b *Bot) startBackground(ctx context.Context) {
 	b.setCommands()
-	b.goBG(func() { b.aiResponderLoop(ctx) })
+	if b.Cfg.AIEnabled {
+		b.goBG(func() { b.aiResponderLoop(ctx) })
+	}
 	b.goBG(func() { b.checkConnectionLoop(ctx) })
 	b.goBG(func() { b.userStoreSweepLoop(ctx) })
 	if b.Cfg.SendGMGN {

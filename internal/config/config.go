@@ -72,6 +72,7 @@ type Config struct {
 	AIURL       string
 	AISessionID string
 	AIInterval  int
+	AIEnabled   bool // AI_ENABLED — the GM-group AI auto-reply is OFF unless "true"
 
 	DonationLink string
 }
@@ -174,6 +175,11 @@ func Load() (*Config, error) {
 			errs = append(errs, fmt.Sprintf("AI_INTERVAL must be an integer (got %q)", v))
 		}
 	}
+
+	// AI_ENABLED gates the GM-group AI auto-reply (and the outbound POST to AI_URL).
+	// Default OFF: the feature only runs when explicitly enabled, so there is no
+	// admin-set-URL SSRF surface unless the operator opts in.
+	c.AIEnabled = strings.EqualFold(opt("AI_ENABLED", "false"), "true")
 
 	c.SendGMGN = strings.EqualFold(req("SEND_GM_GN"), "true")
 	c.GMTime = parseHHMM("GM_TIME", req("GM_TIME"), &errs)
