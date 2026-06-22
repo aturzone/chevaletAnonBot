@@ -31,6 +31,14 @@ func IsUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+// IsNoRows reports whether err is pgx.ErrNoRows (a query that matched no row).
+// The single-row getters below return it for a missing row, so callers can tell
+// "no such record" apart from a genuine DB fault (connection drop, timeout) and
+// route the latter to the central error/report path instead of masking it.
+func IsNoRows(err error) bool {
+	return errors.Is(err, pgx.ErrNoRows)
+}
+
 // DB owns the connection pool and the per-install defaults that the Python
 // schema baked into its DDL / inserts.
 type DB struct {

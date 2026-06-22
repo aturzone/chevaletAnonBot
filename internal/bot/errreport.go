@@ -2,7 +2,6 @@ package bot
 
 import (
 	"fmt"
-	"html"
 	"strconv"
 	"strings"
 	"sync"
@@ -106,8 +105,13 @@ func (b *Bot) errMore(tg *gotgbot.Bot, ctx *ext.Context) error {
 	}
 	_, _ = clbk.Answer(tg, nil)
 
+	// pages are stored ALREADY html-escaped (bot.go onError/onPanic escape before
+	// chunking), and Telegram un-escapes <pre> content exactly once — so do NOT
+	// escape again here, or the admin sees literal entity codes and the inflated
+	// body can overflow Telegram's 4096 limit (the send then fails and the
+	// dispatcher files a spurious second incident).
 	text := fmt.Sprintf("<b>جزئیات خطا</b> <code>%s</code> — صفحه %d/%d\n<pre>%s</pre>",
-		code, idx+1, len(pages), html.EscapeString(pages[idx]))
+		code, idx+1, len(pages), pages[idx])
 
 	opts := &gotgbot.SendMessageOpts{ParseMode: "HTML"}
 	if msg != nil {

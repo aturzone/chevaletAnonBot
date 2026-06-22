@@ -116,9 +116,16 @@ func (b *Bot) adminDispatch(tg *gotgbot.Bot, ctx *ext.Context, userid string, te
 		}
 		banned, limit, serr := b.DB.UserStatus(dbctx, uid)
 		if serr != nil {
-			// Python's user_status raised on a missing row -> caught as
-			// "user has not started the bot yet?".
-			return b.replyText(ctx, "user has not started the bot yet?")
+			// A missing row (uid never started the bot) is the expected "not found"
+			// case. ANY other error (connection drop, statement/ctx timeout) is a
+			// genuine DB fault and must propagate to prep's handleErr so the admin
+			// gets the DB-problem notice and ERROR_CHAT_ID gets the throttled report
+			// — exactly the diagnostic signal you want during the shared-DB cutover.
+			// Collapsing both into "not started" hid real faults.
+			if db.IsNoRows(serr) {
+				return b.replyText(ctx, "user has not started the bot yet?")
+			}
+			return serr
 		}
 		return b.replyText(ctx, fmt.Sprintf("is_banned=%s\ncid_limit=%d", pyBool(banned), limit))
 

@@ -269,6 +269,19 @@ func updateCid(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	chosenCid := ud.d.chosenCid
 	linksMID := ud.d.linksMID
 
+	// chosenCid/linksMID live in the per-user userData, which is idle-evicted after
+	// 2h — but the conversation state lives in a SEPARATE store with no eviction. A
+	// >2h pause mid-rename therefore leaves a fresh, empty userData here. With an
+	// empty chosenCid, SetCID below would run `UPDATE cids SET cid=$1 WHERE cid=''`,
+	// match zero rows, raise no error, and still report success — telling the user a
+	// rename worked when nothing changed. Detect the desync and ask them to retry.
+	if chosenCid == "" {
+		if e := b.replyText(ctx, txtChangingCidCancelled); e != nil {
+			return e
+		}
+		return handlers.EndConversation()
+	}
+
 	// length
 	if n := runeLen(newCid); n < b.Cfg.MinCIDLength || n > b.Cfg.MaxCIDLength {
 		if e := b.sendPlain(ctx, fmt.Sprintf("خطا: تعداد حروف مجاز %d تا %d حرفه",
