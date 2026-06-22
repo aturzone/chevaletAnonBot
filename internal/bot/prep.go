@@ -30,11 +30,20 @@ func (b *Bot) prep(fn Handler) handlers.Response {
 		if ctx.Update.EditedMessage != nil {
 			return nil
 		}
-		// Only operate in private chats — the Python prep rejected group/channel
-		// updates (the GM group's AI flow is handled by a separate, un-prepped
-		// handler).
-		if ctx.EffectiveChat != nil && ctx.EffectiveChat.Type != "private" {
-			return nil
+		// Reject exactly the chats the Python prep rejected (decorators.py:21-31):
+		// legacy "group"/"channel" chats and the GM group (whose AI flow has its
+		// own un-prepped handler). Private chats AND ordinary supergroups are
+		// allowed — Python does NOT reject type=="supergroup", so the live bot
+		// still answers commands and the catch-all there; the earlier "private
+		// only" gate silently dropped those, a parity gap. (Python's extra
+		// my_chat_member check is moot: that update type isn't in AllowedUpdates.)
+		if ec := ctx.EffectiveChat; ec != nil {
+			if ec.Type == "channel" || ec.Type == "group" {
+				return nil
+			}
+			if b.Cfg.GMGroupID != "" && strconv.FormatInt(ec.Id, 10) == b.Cfg.GMGroupID {
+				return nil
+			}
 		}
 		if ctx.EffectiveUser == nil {
 			return nil
