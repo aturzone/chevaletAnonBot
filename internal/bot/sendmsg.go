@@ -400,10 +400,32 @@ func (b *Bot) warningHandle(ctx *ext.Context, wasChannelReply bool, targetUID, u
 		return nil, b.replyText(ctx, sentText)
 	}
 
-	// pack the message ids into as few "delete" buttons as fit in 64 bytes.
+	// pack the message ids into as few "delete" buttons as fit in 64 bytes, two
+	// buttons per row (the historical callback_data layout deleteMsgClbk parses).
 	parts := strings.Split(deletionCallbackData, "|")
-	encChid := parts[0]
-	mids := parts[1:]
+	rows := packDeleteButtons(parts[0], parts[1:])
+
+	// Python applied `% deletion_timeout` to the whole "{sent_text}\n{DELETION_TEXT}"
+	// string; we only format DELETION_TEXT so a literal '%' in the target's
+	// display name can never break the formatting.
+	warnText := sentText + "\n" + fmt.Sprintf(config.DeletionText, deletionTimeout)
+	warnMsg, err := msg.Reply(b.TG, warnText, &gotgbot.SendMessageOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows},
+	})
+	if err != nil {
+		return nil, err
+	}
+	b.scheduleDeleteWarning(warnMsg, deletionTimeout)
+	return warnMsg, nil
+}
+
+// packDeleteButtons greedily packs message ids into "delete" buttons whose
+// callback_data ("delete|<encChid>|<mid>|<mid>…") stays within Telegram's 64-byte
+// limit, then groups the buttons two-per-row. Each id appears exactly once across
+// the buttons, in order. Mirrors handler_templates._warning_handle's packing loop
+// (the layout deleteMsgClbk re-parses), extracted so it can be unit-tested.
+func packDeleteButtons(encChid string, mids []string) [][]gotgbot.InlineKeyboardButton {
 	kbTemplate := func() []string { return []string{"delete", encChid} }
 	isValid := func(rm []string) bool { return len(strings.Join(rm, "|")) <= 64 }
 
@@ -430,20 +452,7 @@ func (b *Bot) warningHandle(ctx *ext.Context, wasChannelReply bool, targetUID, u
 		}
 		rows = append(rows, buttons[i:end])
 	}
-
-	// Python applied `% deletion_timeout` to the whole "{sent_text}\n{DELETION_TEXT}"
-	// string; we only format DELETION_TEXT so a literal '%' in the target's
-	// display name can never break the formatting.
-	warnText := sentText + "\n" + fmt.Sprintf(config.DeletionText, deletionTimeout)
-	warnMsg, err := msg.Reply(b.TG, warnText, &gotgbot.SendMessageOpts{
-		ParseMode:   "HTML",
-		ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows},
-	})
-	if err != nil {
-		return nil, err
-	}
-	b.scheduleDeleteWarning(warnMsg, deletionTimeout)
-	return warnMsg, nil
+	return rows
 }
 
 // addTag ports handler_templates.add_tag: it appends a tag to the copied

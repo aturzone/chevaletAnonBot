@@ -130,39 +130,10 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 	// that no-op by tagging only when a tag actually exists. (audio_tag has a
 	// non-null default, so audio albums are always tagged, matching Python.)
 	if tag != "" {
-		type tagTarget struct {
-			idx int
-			msg *gotgbot.Message
-		}
-		markAll := func() []tagTarget {
-			all := make([]tagTarget, 0, len(msgs))
-			for i, m := range msgs {
-				all = append(all, tagTarget{idx: i, msg: m})
-			}
-			return all
-		}
-		var toTag []tagTarget
-		if mt == "photo" || mt == "video" {
-			for i, m := range msgs {
-				if m.OriginalCaptionHTML() != "" {
-					if len(toTag) > 0 {
-						// more than one captioned message -> tag them all.
-						toTag = markAll()
-						break
-					}
-					toTag = append(toTag, tagTarget{idx: i, msg: m})
-				}
-			}
-			if len(toTag) == 0 {
-				toTag = append(toTag, tagTarget{idx: 0, msg: msgs[0]})
-			}
-		} else {
-			toTag = markAll()
-		}
-		for _, tt := range toTag {
-			if tt.idx < len(ud.d.sentMedias) {
-				copiedID, _ := strconv.ParseInt(ud.d.sentMedias[tt.idx], 10, 64)
-				b.addTag(tt.msg, "caption", targetID, copiedID, replyMarkup, sanitizeUserHTML(tag))
+		for _, idx := range selectTagTargets(mt, msgs) {
+			if idx < len(ud.d.sentMedias) {
+				copiedID, _ := strconv.ParseInt(ud.d.sentMedias[idx], 10, 64)
+				b.addTag(msgs[idx], "caption", targetID, copiedID, replyMarkup, sanitizeUserHTML(tag))
 			}
 		}
 	}
@@ -280,6 +251,45 @@ func dedupeSortMsgs(in []*gotgbot.Message) []*gotgbot.Message {
 		last = m.MessageId
 	}
 	return dedup
+}
+
+// selectTagTargets returns the indices of the album items that should receive
+// the tag caption, mirroring handle_media's selection: for a photo/video album,
+// tag the single captioned item, ALL items when two-or-more are captioned, or the
+// first item when none is captioned; for any other type (audio/document/voice/…)
+// tag every item. handle_media only ever distinguishes photo/video from the rest
+// (mediaType collapses everything else to "other"). Extracted from handleMedia so
+// the parity-sensitive caption-count branch can be unit-tested.
+func selectTagTargets(mt string, msgs []*gotgbot.Message) []int {
+	if len(msgs) == 0 {
+		return nil
+	}
+	if mt == "photo" || mt == "video" {
+		var captioned []int
+		for i, m := range msgs {
+			if m.OriginalCaptionHTML() != "" {
+				captioned = append(captioned, i)
+			}
+		}
+		switch len(captioned) {
+		case 0:
+			return []int{0}
+		case 1:
+			return captioned
+		default:
+			return allIndices(len(msgs))
+		}
+	}
+	return allIndices(len(msgs))
+}
+
+// allIndices returns [0,1,…,n-1].
+func allIndices(n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = i
+	}
+	return out
 }
 
 // dedupeOrdered removes duplicates while preserving first-seen order.

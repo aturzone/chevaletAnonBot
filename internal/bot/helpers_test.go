@@ -75,6 +75,40 @@ func TestFmtText(t *testing.T) {
 	}
 }
 
+func TestIndexOf(t *testing.T) {
+	s := []string{"a", "b", "c"}
+	// drives the "sent with link N" indicator: idx+1 is the link number shown.
+	if got := indexOf(s, "a"); got != 0 {
+		t.Errorf("indexOf first = %d; want 0", got)
+	}
+	if got := indexOf(s, "c"); got != 2 {
+		t.Errorf("indexOf last = %d; want 2", got)
+	}
+	if got := indexOf(s, "z"); got != -1 {
+		t.Errorf("indexOf miss = %d; want -1", got)
+	}
+	if got := indexOf(nil, "a"); got != -1 {
+		t.Errorf("indexOf(nil) = %d; want -1", got)
+	}
+}
+
+func TestEqualStringSlices(t *testing.T) {
+	// drives the delete-button packing terminator (warningHandle): a template that
+	// gained no mids must be detected so an empty button is never emitted.
+	if !equalStringSlices([]string{"delete", "x"}, []string{"delete", "x"}) {
+		t.Error("equal slices reported unequal")
+	}
+	if equalStringSlices([]string{"a"}, []string{"a", "b"}) {
+		t.Error("different-length slices reported equal")
+	}
+	if equalStringSlices([]string{"a", "b"}, []string{"a", "c"}) {
+		t.Error("different-content slices reported equal")
+	}
+	if !equalStringSlices(nil, nil) {
+		t.Error("nil/nil reported unequal")
+	}
+}
+
 func TestTruncate(t *testing.T) {
 	if got := truncate("hello", 10); got != "hello" {
 		t.Errorf("truncate short = %q", got)
