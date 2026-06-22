@@ -1,0 +1,51 @@
+# PRE-CUTOVER SHADOW TEST — the Go TEST bot on the LIVE production database.
+#
+# Runs the Go bot with the TEST bot token against the SAME production Postgres
+# (telegram-bot-db) that the Python bot uses, so the Go bot can be validated
+# against real production data WITHOUT cutting over. The Python production bot
+# keeps serving users, untouched.
+#
+# Why this is safe for production:
+#   - Telegram will not let the TEST bot message a user who never started it, so
+#     it physically cannot disturb production users (who only started the Python
+#     bot). SEND_GM_GN=false also stops it posting greetings.
+#   - The Go schema is identical and MakeTables is CREATE TABLE IF NOT EXISTS, a
+#     no-op against the existing tables — no schema or data migration.
+#   - It only READs prod data and writes rows for the testers who interact with
+#     the TEST bot (their own accounts).
+#   - DO NOT run `/admin send-mass-msg` here: it would fire ~10k failing copy
+#     calls (all rejected, since prod users never started the test bot).
+#
+# Uses deploy/go/.env.sharedtest (TEST BOT_TOKEN + prod DB creds + SEND_GM_GN=false).
+# Run:
+#   docker compose -p chevalet-go-staging -f deploy/go/docker-compose.sharedtest.yml up -d --build
+# Revert to the isolated staging stack:
+#   docker compose -p chevalet-go-staging -f deploy/go/docker-compose.yml up -d
+
+services:
+  go-bot:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: chevalet-go-bot:sharedtest
+    container_name: chevalet-go-bot
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env.sharedtest
+    networks:
+      - prod
+    # HEALTH_PORT is 12564 in .env.sharedtest; hardcoded here so the probe needs
+    # no compose-level interpolation.
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 12564 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+networks:
+  prod:
+    external: true
+    # The docker network telegram-bot-db is attached to (verified on the server).
+    name: chevaletbot_bot-network

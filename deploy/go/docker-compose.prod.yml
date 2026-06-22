@@ -74,7 +74,8 @@ services:
 networks:
   prod:
     external: true
-    # The network telegram-bot-db is on. Verify with the command in CUTOVER.md;
-    # for a compose project in /home/hamid/chevaletbot it is typically
-    # "chevaletbot_default".
-    name: chevaletbot_default
+    # The network telegram-bot-db is on — VERIFIED on the server (the python
+    # stack's compose project is "chevaletbot_bot", so the network is
+    # "chevaletbot_bot-network"; re-verify before cutover with:
+    #   docker inspect telegram-bot-db --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}')
+    name: chevaletbot_bot-network
