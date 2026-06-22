@@ -118,10 +118,11 @@ func (b *Bot) adminDispatch(tg *gotgbot.Bot, ctx *ext.Context, userid string, te
 		if serr != nil {
 			// A missing row (uid never started the bot) is the expected "not found"
 			// case. ANY other error (connection drop, statement/ctx timeout) is a
-			// genuine DB fault and must propagate to prep's handleErr so the admin
-			// gets the DB-problem notice and ERROR_CHAT_ID gets the throttled report
-			// — exactly the diagnostic signal you want during the shared-DB cutover.
-			// Collapsing both into "not started" hid real faults.
+			// genuine DB fault: return it so adminCmd's error switch surfaces the
+			// actual error class to the admin ("error: <type> | <msg>", matching
+			// Python admin_cmd's broad `except Exception`) instead of masking every
+			// fault as "not started". Admin-only path; like Python it does not
+			// itself page ERROR_CHAT_ID.
 			if db.IsNoRows(serr) {
 				return b.replyText(ctx, "user has not started the bot yet?")
 			}
