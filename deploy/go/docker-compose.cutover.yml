@@ -1,0 +1,42 @@
+# PRODUCTION CUTOVER — the Go bot becomes production.
+#
+# Runs the Go bot with the PRODUCTION bot token against the production Postgres
+# (telegram-bot-db), replacing the Python bot. The Python container is stopped
+# (not removed) during cutover and kept for instant rollback. See CUTOVER.md.
+#
+# Config: deploy/go/.env.prod (built from the Python bot's live config:
+# real BOT_TOKEN + prod chats/admins/GM + telegram-bot-db creds; with
+# AI_ENABLED=false per the project decision). env_file passes EVERY var so no
+# variable can be silently dropped.
+#
+# Run:
+#   docker compose -p chevalet-go-prod -f deploy/go/docker-compose.cutover.yml up -d --build
+# Rollback (instant): docker stop chevalet-go-bot-prod && docker start telegram-bot
+services:
+  go-bot:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: chevalet-go-bot:prod
+    container_name: chevalet-go-bot-prod
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env.prod
+    volumes:
+      # Host backups dir -> where `/admin backup` reads the newest dump. Filled
+      # hourly by deploy/go/backup.sh (cron). Absolute path = this server's deploy.
+      - /opt/chevalet-go-staging/backups:/app/backups
+    networks:
+      - prod
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 12564 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+networks:
+  prod:
+    external: true
+    name: chevaletbot_bot-network
