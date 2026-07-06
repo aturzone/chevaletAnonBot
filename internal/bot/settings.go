@@ -351,6 +351,237 @@ func (b *Bot) removeTag(tg *gotgbot.Bot, ctx *ext.Context, userid string,
 	return handlers.EndConversation()
 }
 
+// --- anonymous nickname (optional per-sender signature) ----------------------
+
+// maxAnonEmojiRunes caps the optional emoji of the anonymous nickname. It is
+// small (an emoji, not a sentence) but roomy enough for multi-codepoint ZWJ
+// sequences like 👨‍👩‍👧‍👦.
+const maxAnonEmojiRunes = 16
+
+// anonName ports the "🎭 نام مستعار ناشناس" menu entry. "anon-name|" renders the
+// page; "anon-name|activate" / "anon-name|deactivate" flip the on/off switch
+// (with a popup) then re-render. The nickname and emoji themselves are set via
+// the two-step anon-name-set flow (states "3" then "4").
+func anonName(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	clbk := ctx.CallbackQuery
+	if clbk == nil || clbk.Data == "" {
+		return nil
+	}
+	_, _ = clbk.Answer(tg, nil)
+
+	dbctx, cancel := b.bg()
+	defer cancel()
+
+	activation := ""
+	if i := strings.IndexByte(clbk.Data, '|'); i >= 0 {
+		activation = clbk.Data[i+1:]
+	}
+	switch activation {
+	case "activate":
+		if err := b.DB.SetAnonEnabled(dbctx, userid, true); err != nil {
+			return err
+		}
+		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtAnonEnabled})
+	case "deactivate":
+		if err := b.DB.SetAnonEnabled(dbctx, userid, false); err != nil {
+			return err
+		}
+		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: txtAnonDisabled})
+	}
+	if err := b.renderAnonMenu(dbctx, tg, ctx, userid); err != nil {
+		return err
+	}
+	return handlers.EndConversation()
+}
+
+// renderAnonMenu edits the current message to the anonymous-nickname page: the
+// on/off state, a live preview of the signature, and the contextual buttons
+// (set/change always; activate-or-deactivate + remove only once a name exists).
+func (b *Bot) renderAnonMenu(dbctx context.Context, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	enabled, name, emoji, err := b.DB.GetAnonSig(dbctx, userid)
+	if err != nil {
+		return err
+	}
+	// preview with enabled forced true, so the user always sees what they've
+	// configured even while the signature is switched off.
+	preview := anonSignature(true, name, emoji)
+	if preview == "" {
+		preview = txtAnonNoneYet
+	}
+	state := txtStateInactive
+	if enabled {
+		state = txtStateActive
+	}
+	txt, err := b.Texts.Get("settings/anon_name")
+	if err != nil {
+		return err
+	}
+
+	rows := [][]gotgbot.InlineKeyboardButton{row(settingsButtons["anon-name-set"])}
+	if name != "" {
+		if enabled {
+			rows = append(rows, row(cb(btnAnonDeactivate, "anon-name|deactivate")))
+		} else {
+			rows = append(rows, row(cb(btnAnonActivate, "anon-name|activate")))
+		}
+		rows = append(rows, row(settingsButtons["anon-name-remove"]))
+	}
+	rows = append(rows, row(settingsButtons["back-to-menu"]))
+
+	_, _, e := ctx.EffectiveMessage.EditText(tg, fmtText(txt, state, preview), &gotgbot.EditMessageTextOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: ikb(rows...),
+	})
+	return e
+}
+
+// anonNameSet ports the "✏️ تنظیم / تغییر نام مستعار" button: prompt for the
+// nickname text and enter state "3".
+func anonNameSet(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	if ctx.CallbackQuery == nil || ctx.CallbackQuery.Data == "" {
+		return nil
+	}
+	_, _ = ctx.CallbackQuery.Answer(tg, nil)
+	if _, _, e := ctx.EffectiveMessage.EditText(tg, txtAnonSetPrompt, &gotgbot.EditMessageTextOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: ikb(row(settingsButtons["formatting"]), row(settingsButtons["nvm-back-to-menu"])),
+	}); e != nil {
+		return e
+	}
+	b.ud(ctx).d.ogMID = ctx.EffectiveMessage.MessageId
+	return handlers.NextConversationState("3")
+}
+
+// updateAnonName is state "3": stage the nickname text (NOT committed yet) and
+// prompt for the optional emoji (state "4"). Nothing is written to the DB until
+// finishAnon, so aborting at the emoji step never changes a live signature —
+// whether via /cancel or a non-text message (both clear user_data) or by backing
+// out to the menu (which just abandons the staged name; finishAnon is the only
+// reader, and it always overwrites the field first, so a dangling value is inert).
+func updateAnonName(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	msg := ctx.EffectiveMessage
+	name := msg.OriginalHTML()
+	if runeLen(name) > b.Cfg.MaxNameLength {
+		if e := b.sendPlain(ctx, fmt.Sprintf(txtAnonNameTooLong, b.Cfg.MaxNameLength)); e != nil {
+			return e
+		}
+		return handlers.NextConversationState("3")
+	}
+	b.deleteOgMID(tg, ctx, userid)
+	ud := b.ud(ctx)
+	ud.d.anonPendingName = name
+	sent, e := msg.Reply(tg, txtAnonEmojiPrompt, &gotgbot.SendMessageOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: ikb(row(settingsButtons["anon-name-noemoji"]), row(settingsButtons["nvm-back-to-menu"])),
+	})
+	if e != nil {
+		return e
+	}
+	ud.d.ogMID = sent.MessageId
+	return handlers.NextConversationState("4")
+}
+
+// updateAnonEmoji is state "4" (message path): validate the emoji, then finish.
+func updateAnonEmoji(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	emoji := ctx.EffectiveMessage.OriginalHTML()
+	if runeLen(emoji) > maxAnonEmojiRunes {
+		if e := b.sendPlain(ctx, fmt.Sprintf(txtAnonEmojiTooLong, maxAnonEmojiRunes)); e != nil {
+			return e
+		}
+		return handlers.NextConversationState("4")
+	}
+	return b.finishAnon(tg, ctx, userid, &emoji)
+}
+
+// anonSkipEmoji is state "4" (the "بدون ایموجی" button): finish with no emoji.
+func anonSkipEmoji(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	if ctx.CallbackQuery != nil {
+		_, _ = ctx.CallbackQuery.Answer(tg, nil)
+	}
+	return b.finishAnon(tg, ctx, userid, nil)
+}
+
+// finishAnon commits the staged nickname + emoji and switches the signature ON in
+// one step, then confirms with a preview and ends the conversation.
+//
+// The confirmation must land on a real message. On the "بدون ایموجی" callback the
+// emoji prompt IS ctx.EffectiveMessage, so it is edited in place — deleting it and
+// then replying to it would fail with "message to be replied not found", which
+// prep swallows via errReplyNotFound, stranding the user in state "4" with no
+// confirmation. On the emoji-text path the prompt is a separate message, so it is
+// deleted and the confirmation replies to the user's emoji message.
+func (b *Bot) finishAnon(tg *gotgbot.Bot, ctx *ext.Context, userid string, emoji *string) error {
+	ud := b.ud(ctx)
+	name := ud.d.anonPendingName
+	promptMID := ud.d.ogMID
+
+	dbctx, cancel := b.bg()
+	defer cancel()
+	if err := b.DB.SetAnonName(dbctx, userid, &name); err != nil {
+		return err
+	}
+	if err := b.DB.SetAnonEmoji(dbctx, userid, emoji); err != nil {
+		return err
+	}
+	if err := b.DB.SetAnonEnabled(dbctx, userid, true); err != nil {
+		return err
+	}
+	ud.clear() // staged values committed; nothing left to cancel
+
+	enabled, savedName, savedEmoji, err := b.DB.GetAnonSig(dbctx, userid)
+	if err != nil {
+		return err
+	}
+	confirm := fmt.Sprintf(txtAnonSaved, anonSignature(enabled, savedName, savedEmoji))
+	backMarkup := ikb(row(settingsButtons["back-to-menu"]))
+
+	// The nickname is already saved; the confirmation is cosmetic, so it is
+	// best-effort and the conversation ends regardless — the user is never left
+	// stranded in state "4" by a transient edit/reply failure.
+	if ctx.CallbackQuery != nil {
+		// skip-emoji button: the prompt IS this message, so edit it in place.
+		_, _, _ = ctx.EffectiveMessage.EditText(tg, confirm, &gotgbot.EditMessageTextOpts{
+			ParseMode:   "HTML",
+			ReplyMarkup: backMarkup,
+		})
+		return handlers.EndConversation()
+	}
+	// emoji-text path: remove the prompt, reply to the user's emoji message.
+	if promptMID != 0 {
+		_, _ = tg.DeleteMessage(ctx.EffectiveChat.Id, promptMID, nil)
+	}
+	_, _ = ctx.EffectiveMessage.Reply(tg, confirm, &gotgbot.SendMessageOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: backMarkup,
+	})
+	return handlers.EndConversation()
+}
+
+// removeAnonName ports the "🗑 حذف نام مستعار" button: clear the name and emoji
+// and switch the signature off.
+func removeAnonName(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	if ctx.CallbackQuery != nil {
+		_, _ = ctx.CallbackQuery.Answer(tg, nil)
+	}
+	dbctx, cancel := b.bg()
+	defer cancel()
+	if err := b.DB.SetAnonName(dbctx, userid, nil); err != nil {
+		return err
+	}
+	if err := b.DB.SetAnonEmoji(dbctx, userid, nil); err != nil {
+		return err
+	}
+	if err := b.DB.SetAnonEnabled(dbctx, userid, false); err != nil {
+		return err
+	}
+	if _, _, e := ctx.EffectiveMessage.EditText(tg, txtAnonRemoved, &gotgbot.EditMessageTextOpts{
+		ReplyMarkup: ikb(row(settingsButtons["back-to-menu"])),
+	}); e != nil {
+		return e
+	}
+	return handlers.EndConversation()
+}
+
 // unblockAll ports unblock_all_clbk.
 func unblockAll(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	clbk := ctx.CallbackQuery

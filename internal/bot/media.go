@@ -121,19 +121,29 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 		}
 	}
 
+	// The SENDER's optional anonymous nickname (see sendMsgCore), combined with the
+	// receiver tag into one caption footer. sig is "" unless the sender enabled it.
+	anonEnabled, anonName, anonEmoji, err := b.DB.GetAnonSig(dbctx, userid)
+	if err != nil {
+		return err
+	}
+	footer := withSig(sanitizeUserHTML(tag), anonSignature(anonEnabled, anonName, anonEmoji))
+
 	// Parity with Python handle_media: it passes the raw tag straight to add_tag,
 	// and when the target has no custom tag (NULL -> Python None) the
 	// `og_text_html + "\n" + tag` concatenation raises a TypeError that add_tag
 	// swallows — so the album captions are left UNTOUCHED and no reply markup is
 	// placed on any media item; the keyboard reaches the target only via the
 	// carrier message below. Go's GetCustomTag maps NULL -> "", so we reproduce
-	// that no-op by tagging only when a tag actually exists. (audio_tag has a
-	// non-null default, so audio albums are always tagged, matching Python.)
-	if tag != "" {
+	// that no-op by tagging only when the footer is non-empty. (audio_tag has a
+	// non-null default, so audio albums are always tagged, matching Python.) A
+	// sender signature adds itself to the footer, so an opted-in sender's album is
+	// captioned even when the receiver set no tag — the intended new behaviour.
+	if footer != "" {
 		for _, idx := range selectTagTargets(mt, msgs) {
 			if idx < len(ud.d.sentMedias) {
 				copiedID, _ := strconv.ParseInt(ud.d.sentMedias[idx], 10, 64)
-				b.addTag(msgs[idx], "caption", targetID, copiedID, replyMarkup, sanitizeUserHTML(tag))
+				b.addTag(msgs[idx], "caption", targetID, copiedID, replyMarkup, footer, nil)
 			}
 		}
 	}

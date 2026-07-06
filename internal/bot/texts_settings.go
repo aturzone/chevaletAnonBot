@@ -24,6 +24,19 @@ const (
 	txtSettingsCancelAll       = "در حال تغییر تنظیماتت بودی پس کنسلش کردم. دوباره امتحان کن"
 	txtCancelledAllGeneric     = "هرچی که بود کنسل شد"
 
+	// anonymous nickname (optional per-sender signature)
+	txtAnonNoneYet      = "[هنوز نساختی]"
+	txtAnonEnabled      = "نام مستعار روشن شد ✅"
+	txtAnonDisabled     = "نام مستعار خاموش شد. پیام‌هات دوباره کاملاً ناشناسن"
+	txtAnonSetPrompt    = "اسمِ مستعارِ ناشناستو توی پیام بعدی بفرست:"
+	txtAnonEmojiPrompt  = "خب حالا ایموجی‌شو بفرست.\nاگه نمی‌خوای ایموجی داشته باشه، دکمه‌ی «بدون ایموجی» رو بزن."
+	txtAnonSaved        = "ثبت شد ✅ نام مستعارت این شد:\n%s\n\nمیتونی لینک خودتو تست کنی تا ببینی چجوری نشون داده میشه :)"
+	txtAnonRemoved      = "نام مستعارت پاک شد و قابلیت خاموش شد. حالا پیام‌هات کاملاً ناشناسن"
+	txtAnonNameTooLong  = "اسم مستعار نباید بیشتر از %dتا حرف باشه. دوباره امتحان کن.\nنکته: قالب‌بندی یه مقدار به تعداد حروفت اضافه میکنه"
+	txtAnonEmojiTooLong = "ایموجی نباید بیشتر از %dتا کاراکتر باشه. دوباره امتحان کن"
+	btnAnonActivate     = "✅ فعالسازی"
+	btnAnonDeactivate   = "❌ غیرفعالسازی"
+
 	// my_links.py
 	txtMyLinksPromo         = "<blockquote>راستی یادت نره به کانالمون سر بزنی:\n@chevalet_studio</blockquote>"
 	txtAddedNewLink         = "added a new link"

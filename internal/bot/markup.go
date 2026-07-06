@@ -95,6 +95,7 @@ func settingsMainMenu() [][]gotgbot.InlineKeyboardButton {
 		{cb("🖋 ریپلای به بخشی از پیام", "reply-quote|"), cb("👀 نمایش دکمه سین زدن", "seen-settings|")},
 		{cb("⚠️ اخطار پاک سازی پیام", "warning|"), cb("📛 تغییر نام نمایشی", "change-name|")},
 		{cb("#️⃣ تگ آهنگ", "audio-tag|"), cb("#️⃣ تگ دلخواه", "custom-tag|")},
+		{cb("🎭 نام مستعار ناشناس", "anon-name|")},
 		{cb("🚫 آنبلاک شدن خودت", "unblock-me|"), cb("🚫 آنبلاک همه", "unblock-all|")},
 	}
 }
@@ -112,6 +113,9 @@ var settingsButtons = map[string]gotgbot.InlineKeyboardButton{
 	"seen-deactivate":    cb("❌ غیرفعالسازی", "seen-settings|deactivate"),
 	"remove-custom-tag":  cb("🗑 پاک کردن تگ دلخواه", "rm-custom-tag"),
 	"remove-audio-tag":   cb("🗑 پاک کردن تگ آهنگ", "rm-audio-tag"),
+	"anon-name-set":      cb("✏️ تنظیم / تغییر نام مستعار", "anon-name-set"),
+	"anon-name-remove":   cb("🗑 حذف نام مستعار", "anon-name-remove"),
+	"anon-name-noemoji":  cb("بدون ایموجی", "anon-name-noemoji"),
 }
 
 // mylinksDefaultMenu mirrors MYLINKS_MARKUP["default-set"].

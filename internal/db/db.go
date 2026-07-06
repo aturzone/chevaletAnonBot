@@ -124,6 +124,18 @@ func (db *DB) MakeTables(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS reports (
 			id SERIAL PRIMARY KEY,
 			reported_id VARCHAR(255) NOT NULL)`,
+
+		// Additive migrations for features added after the original Python schema.
+		// Each is idempotent (ADD COLUMN IF NOT EXISTS) and, on PostgreSQL 11+, a
+		// metadata-only change (no table rewrite, no long lock) — so it is safe to
+		// run on every startup against the live production database. These three
+		// columns back the optional "anonymous nickname": a signature the SENDER
+		// may attach to the anonymous messages they send. anon_enabled defaults to
+		// FALSE so every existing and new user is opted OUT — the bot behaves
+		// exactly as before until a user turns it on.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS anon_name VARCHAR(255)`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS anon_emoji VARCHAR(255)`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS anon_enabled BOOLEAN NOT NULL DEFAULT FALSE`,
 	}
 	for _, s := range stmts {
 		if _, err := db.pool.Exec(ctx, s); err != nil {

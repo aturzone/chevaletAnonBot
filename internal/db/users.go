@@ -156,3 +156,52 @@ func (db *DB) UserCount(ctx context.Context) (int, error) {
 	err := db.pool.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
 	return n, err
 }
+
+// --- anonymous nickname (optional per-sender signature) ----------------------
+//
+// anon_name / anon_emoji are the user-chosen pseudonym and its optional leading
+// emoji; anon_enabled is the on/off switch. All three default to unset/FALSE, so
+// a user is opted OUT until they configure and enable it. Reads go through
+// GetAnonSig (a single round-trip); the three setters write each column.
+
+// GetAnonSig fetches all three nickname fields in a single round-trip for the
+// hot send path. A missing row or NULL name/emoji map to the zero values (the
+// send path always runs for an initialised user, so a missing row is only a
+// defensive case). enabled reflects anon_enabled verbatim.
+func (db *DB) GetAnonSig(ctx context.Context, uid string) (enabled bool, name, emoji string, err error) {
+	var n, e *string
+	err = db.pool.QueryRow(ctx,
+		`SELECT anon_enabled, anon_name, anon_emoji FROM users WHERE uid=$1`, uid,
+	).Scan(&enabled, &n, &e)
+	if IsNoRows(err) {
+		return false, "", "", nil
+	}
+	if err != nil {
+		return false, "", "", err
+	}
+	if n != nil {
+		name = *n
+	}
+	if e != nil {
+		emoji = *e
+	}
+	return enabled, name, emoji, nil
+}
+
+// SetAnonName sets/clears the nickname. A nil name stores NULL.
+func (db *DB) SetAnonName(ctx context.Context, uid string, name *string) error {
+	_, err := db.pool.Exec(ctx, `UPDATE users SET anon_name=$1 WHERE uid=$2`, name, uid)
+	return err
+}
+
+// SetAnonEmoji sets/clears the leading emoji. A nil emoji stores NULL.
+func (db *DB) SetAnonEmoji(ctx context.Context, uid string, emoji *string) error {
+	_, err := db.pool.Exec(ctx, `UPDATE users SET anon_emoji=$1 WHERE uid=$2`, emoji, uid)
+	return err
+}
+
+// SetAnonEnabled turns the nickname signature on or off.
+func (db *DB) SetAnonEnabled(ctx context.Context, uid string, enabled bool) error {
+	_, err := db.pool.Exec(ctx, `UPDATE users SET anon_enabled=$1 WHERE uid=$2`, enabled, uid)
+	return err
+}

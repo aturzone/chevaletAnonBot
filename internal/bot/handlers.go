@@ -93,6 +93,9 @@ func (b *Bot) settingsConversation() handlers.Conversation {
 		handlers.NewCallback(cqfilters.Prefix("easier-answer|"), b.prep(easierAnswer)),
 		handlers.NewCallback(cqfilters.Prefix("channel-signature|"), b.prep(channelSignature)),
 		handlers.NewCallback(cqfilters.Prefix("seen-settings|"), b.prep(seenSettings)),
+		handlers.NewCallback(cqfilters.Prefix("anon-name|"), b.prep(anonName)),
+		handlers.NewCallback(cqfilters.Prefix("anon-name-set"), b.prep(anonNameSet)),
+		handlers.NewCallback(cqfilters.Prefix("anon-name-remove"), b.prep(removeAnonName)),
 		handlers.NewCallback(cqfilters.Prefix("unblock-all|"), b.prep(unblockAll)),
 		handlers.NewCallback(cqfilters.Prefix("unblock-me|"), b.prep(unblockMe)),
 		handlers.NewCommand("settings", b.prep(settingsCmd)),
@@ -111,6 +114,11 @@ func (b *Bot) settingsConversation() handlers.Conversation {
 			"2": {
 				handlers.NewCallback(cqContains("rm-audio-tag"), b.prep(removeAudioTag)),
 				handlers.NewMessage(textNotCommand, b.prep(updateAudioTag)),
+			},
+			"3": {handlers.NewMessage(textNotCommand, b.prep(updateAnonName))},
+			"4": {
+				handlers.NewCallback(cqContains("anon-name-noemoji"), b.prep(anonSkipEmoji)),
+				handlers.NewMessage(textNotCommand, b.prep(updateAnonEmoji)),
 			},
 		},
 		&handlers.ConversationOpts{

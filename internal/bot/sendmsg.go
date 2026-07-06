@@ -290,8 +290,26 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
+	// The SENDER's optional anonymous nickname, appended as the footer's last line
+	// so the recipient can recognise a consistent pseudonym with no identity leak.
+	// sig is "" unless the sender enabled it, so withSig keeps every default send
+	// byte-for-byte identical to before this feature.
+	anonEnabled, anonName, anonEmoji, err := b.DB.GetAnonSig(dbctx, userid)
+	if err != nil {
+		return "", err
+	}
+	sig := anonSignature(anonEnabled, anonName, anonEmoji)
+
 	if repliedToLink != "" {
 		repliedToLink = `<blockquote><a href="` + repliedToLink + `">ریپلای به این پیام</a></blockquote>`
+	}
+	// The tag edits below re-set the copy's link-preview options, so pass the
+	// target's wpp choice through: for a wpp-off target keep the preview disabled
+	// (matching the wpp edit above) instead of a tag edit reviving it.
+	tagPreview := msg.LinkPreviewOptions
+	if !wpp {
+		tagPreview = &gotgbot.LinkPreviewOptions{IsDisabled: true}
 	}
 	switch {
 	case msg.Audio != nil && customTag == "":
@@ -299,15 +317,17 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		b.addTag(msg, "caption", targetID, copiedID, replyMarkup, sanitizeUserHTML(audioTag)+"\n"+repliedToLink)
+		b.addTag(msg, "caption", targetID, copiedID, replyMarkup, withSig(sanitizeUserHTML(audioTag)+"\n"+repliedToLink, sig), tagPreview)
 	case customTag != "":
 		ct := sanitizeUserHTML(customTag)
-		if !b.addTag(msg, "text", targetID, copiedID, replyMarkup, ct+"\n"+repliedToLink) {
-			b.addTag(msg, "caption", targetID, copiedID, replyMarkup, ct+"\n"+repliedToLink)
+		body := withSig(ct+"\n"+repliedToLink, sig)
+		if !b.addTag(msg, "text", targetID, copiedID, replyMarkup, body, tagPreview) {
+			b.addTag(msg, "caption", targetID, copiedID, replyMarkup, body, tagPreview)
 		}
-	case repliedToLink != "":
-		if !b.addTag(msg, "text", targetID, copiedID, replyMarkup, repliedToLink) {
-			b.addTag(msg, "caption", targetID, copiedID, replyMarkup, repliedToLink)
+	case repliedToLink != "" || sig != "":
+		body := withSig(repliedToLink, sig)
+		if !b.addTag(msg, "text", targetID, copiedID, replyMarkup, body, tagPreview) {
+			b.addTag(msg, "caption", targetID, copiedID, replyMarkup, body, tagPreview)
 		}
 	}
 
@@ -458,7 +478,12 @@ func packDeleteButtons(encChid string, mids []string) [][]gotgbot.InlineKeyboard
 // addTag ports handler_templates.add_tag: it appends a tag to the copied
 // message's text or caption (edit_what is "text" or "caption"). It returns true
 // on success and false on any error (Python returned True / None).
-func (b *Bot) addTag(msg *gotgbot.Message, editWhat string, targetID, copiedID int64, markup gotgbot.InlineKeyboardMarkup, tag string) bool {
+//
+// preview is the link-preview option for the text edit (ignored for a caption).
+// Callers pass the target's effective choice so this edit does not revive a
+// preview an earlier wpp edit disabled; for a wpp-on target it is just the
+// message's own options, so the behaviour is unchanged.
+func (b *Bot) addTag(msg *gotgbot.Message, editWhat string, targetID, copiedID int64, markup gotgbot.InlineKeyboardMarkup, tag string, preview *gotgbot.LinkPreviewOptions) bool {
 	if editWhat == "caption" {
 		caption := msg.OriginalCaptionHTML() + "\n" + tag
 		_, _, err := b.TG.EditMessageCaption(&gotgbot.EditMessageCaptionOpts{
@@ -477,7 +502,7 @@ func (b *Bot) addTag(msg *gotgbot.Message, editWhat string, targetID, copiedID i
 		MessageId:          copiedID,
 		ParseMode:          "HTML",
 		ReplyMarkup:        markup,
-		LinkPreviewOptions: msg.LinkPreviewOptions,
+		LinkPreviewOptions: preview,
 	})
 	return err == nil
 }
