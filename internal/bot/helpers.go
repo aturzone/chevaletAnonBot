@@ -30,6 +30,38 @@ func sanitizeUserHTML(s string) string {
 	return aTagRe.ReplaceAllString(s, "")
 }
 
+// anonSignature renders the sender's optional anonymous-nickname line
+// ("<emoji> <name>", or just "<name>" when no emoji), or "" when the signature
+// is disabled or has no name. name and emoji are user-controlled and embedded
+// into the bot's HTML message shown to the recipient, so both are anchor-stripped
+// exactly like the display name and custom/audio tags.
+func anonSignature(enabled bool, name, emoji string) string {
+	if !enabled || name == "" {
+		return ""
+	}
+	name = sanitizeUserHTML(name)
+	if emoji != "" {
+		return sanitizeUserHTML(emoji) + " " + name
+	}
+	return name
+}
+
+// withSig appends the sender signature as the final line of a message footer.
+// When sig is empty the base is returned byte-for-byte unchanged, so a user who
+// has not enabled a nickname sees exactly the previous behaviour (this is what
+// keeps the feature a true no-op while opted out). A trailing newline on base is
+// trimmed first so the signature never lands after a blank line.
+func withSig(base, sig string) string {
+	if sig == "" {
+		return base
+	}
+	base = strings.TrimRight(base, "\n")
+	if base == "" {
+		return sig
+	}
+	return base + "\n" + sig
+}
+
 // bg returns a background context bounded by dbOpTimeout, for a handler's
 // database work. Handlers call it for short-lived query groups.
 func (b *Bot) bg() (context.Context, context.CancelFunc) {

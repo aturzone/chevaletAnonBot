@@ -89,6 +89,12 @@ type convData struct {
 	// name/tag update.
 	ogMID int64 // "og_mid"
 
+	// anonymous-nickname flow: the nickname typed in state "3", held here until
+	// the emoji step (state "4") completes so name+emoji+enabled commit together.
+	// Staging it (instead of writing on state "3") means aborting at the emoji
+	// step leaves any existing live signature untouched, and clear() truly cancels.
+	anonPendingName string
+
 	// my_links conversation (my_links.py): the cid being renamed and the links
 	// message id to refresh.
 	chosenCid string // "chosen_cid"

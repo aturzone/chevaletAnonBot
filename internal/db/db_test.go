@@ -137,6 +137,30 @@ func TestUsersAndSettings(t *testing.T) {
 	if custom != "" {
 		t.Fatalf("GetCustomTag after clear = %q; want empty", custom)
 	}
+
+	// anonymous nickname: defaults (opted out), setters, the combined getter, clear.
+	en, nm, em, err := d.GetAnonSig(ctx, "u1")
+	noErr(t, err, "GetAnonSig default")
+	if en || nm != "" || em != "" {
+		t.Fatalf("GetAnonSig default = (%v,%q,%q); want (false,\"\",\"\")", en, nm, em)
+	}
+	noErr(t, d.SetAnonName(ctx, "u1", ptr("روباه آبی")), "SetAnonName")
+	noErr(t, d.SetAnonEmoji(ctx, "u1", ptr("🦊")), "SetAnonEmoji")
+	noErr(t, d.SetAnonEnabled(ctx, "u1", true), "SetAnonEnabled")
+	en, nm, em, err = d.GetAnonSig(ctx, "u1")
+	noErr(t, err, "GetAnonSig set")
+	if !en || nm != "روباه آبی" || em != "🦊" {
+		t.Fatalf("GetAnonSig set = (%v,%q,%q); want (true,روباه آبی,🦊)", en, nm, em)
+	}
+	noErr(t, d.SetAnonName(ctx, "u1", nil), "SetAnonName clear")   // -> NULL
+	noErr(t, d.SetAnonEmoji(ctx, "u1", nil), "SetAnonEmoji clear") // -> NULL
+	noErr(t, d.SetAnonEnabled(ctx, "u1", false), "SetAnonEnabled off")
+	en, nm, em, err = d.GetAnonSig(ctx, "u1")
+	noErr(t, err, "GetAnonSig cleared")
+	if en || nm != "" || em != "" {
+		t.Fatalf("GetAnonSig cleared = (%v,%q,%q); want (false,\"\",\"\")", en, nm, em)
+	}
+
 	name, err = d.GetName(ctx, "u1")
 	noErr(t, err, "GetName set")
 	if name != "Bob" {
