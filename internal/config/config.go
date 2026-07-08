@@ -69,6 +69,13 @@ type Config struct {
 	GMGroupID    string
 	GMGroupTopic string
 
+	// Optional nightly DB-backup delivery: once a day at BackupTime (Asia/Tehran)
+	// the newest backups/ file is sent to the single chat BackupAdminID. The whole
+	// job is OFF when BackupAdminID == 0 (env BACKUP_ADMIN_ID unset), so it never
+	// runs — and never broadcasts — unless explicitly configured.
+	BackupAdminID int64
+	BackupTime    [2]int
+
 	AIURL       string
 	AISessionID string
 	AIInterval  int
@@ -186,6 +193,30 @@ func Load() (*Config, error) {
 	c.GNTime = parseHHMM("GN_TIME", req("GN_TIME"), &errs)
 	c.GMGroupID = req("GM_GROUP_ID")
 
+	// Optional nightly-backup-to-admin job. Both keys are optional: the feature is
+	// off unless BACKUP_ADMIN_ID is a valid ADMINS id. BACKUP_TIME defaults to
+	// 02:17 (Asia/Tehran) — a quiet end-of-night snapshot, deliberately off the
+	// hourly backup cron's ":00" minute (belt-and-suspenders on top of the
+	// send-path's min-age guard).
+	c.BackupTime = [2]int{2, 17}
+	if v := opt("BACKUP_TIME", ""); v != "" {
+		c.BackupTime = parseHHMM("BACKUP_TIME", v, &errs)
+	}
+	if v := opt("BACKUP_ADMIN_ID", ""); v != "" {
+		n, perr := strconv.ParseInt(v, 10, 64)
+		switch {
+		case perr != nil:
+			errs = append(errs, fmt.Sprintf("BACKUP_ADMIN_ID must be an integer (got %q)", v))
+		case !adminIDAllowed(c.Admins, v):
+			// Must be a trusted ADMINS member: a typo must NOT silently ship the
+			// full DB to a random user (or a negative group/channel id) every
+			// night. Fail loud at startup instead of exfiltrating quietly.
+			errs = append(errs, fmt.Sprintf("BACKUP_ADMIN_ID %q must be one of ADMINS %v", v, c.Admins))
+		default:
+			c.BackupAdminID = n
+		}
+	}
+
 	c.DonationLink = req("DONATION_LINK")
 
 	if len(missing) > 0 {
@@ -195,6 +226,17 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: %s", strings.Join(errs, "; "))
 	}
 	return c, nil
+}
+
+// adminIDAllowed reports whether id (a Telegram user-id string) is present in the
+// ADMINS list, tolerant of surrounding whitespace in the '|'-split entries.
+func adminIDAllowed(admins []string, id string) bool {
+	for _, a := range admins {
+		if strings.TrimSpace(a) == id {
+			return true
+		}
+	}
+	return false
 }
 
 // parseHHMM parses "HH:MM" into [hour, minute], mirroring config.py's
