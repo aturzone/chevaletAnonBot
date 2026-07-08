@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -303,20 +302,17 @@ func (b *Bot) adminReport(ctx *ext.Context, dbctx context.Context, text []string
 }
 
 // adminBackup ports the /admin backup branch: send the newest file in backups/.
+// Selection is by mtime via latestBackupFile (shared with the nightly job); the
+// original plain name sort could be fooled by a differently-prefixed file into
+// returning a stale dump.
 func (b *Bot) adminBackup(tg *gotgbot.Bot, ctx *ext.Context) error {
-	entries, err := os.ReadDir("backups")
+	latest, err := latestBackupFile("backups", 0) // 0 = newest right now (manual command)
 	if err != nil {
 		return err
 	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Name())
+	if latest == "" {
+		return errWrongSyntax // no backup yet -> Python's backups[-1] IndexError path
 	}
-	if len(names) == 0 {
-		return errWrongSyntax // Python's backups[-1] would IndexError -> wrong syntax
-	}
-	sort.Strings(names)
-	latest := names[len(names)-1]
 	f, err := os.Open(filepath.Join("backups", latest))
 	if err != nil {
 		return err

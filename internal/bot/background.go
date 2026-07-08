@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,10 @@ func (b *Bot) startBackground(ctx context.Context) {
 	if b.Cfg.SendGMGN {
 		b.goBG(func() { b.gmgnLoop(ctx, b.Cfg.GMTime, true) })  // morning
 		b.goBG(func() { b.gmgnLoop(ctx, b.Cfg.GNTime, false) }) // night
+	}
+	// Nightly DB backup to one admin's DM — off unless BACKUP_ADMIN_ID is set.
+	if b.Cfg.BackupAdminID != 0 {
+		b.goBG(func() { b.backupLoop(ctx, b.Cfg.BackupTime, b.Cfg.BackupAdminID) })
 	}
 }
 
@@ -152,6 +157,117 @@ func (b *Bot) sendGMGN(isMorning bool) {
 	if _, err := b.TG.SendMessage(gid, text, opts); err != nil {
 		slog.Warn("send_gm_gn failed", "err", err)
 	}
+}
+
+// latestBackupFile returns the name of the most-recently-MODIFIED file in dir
+// (newest by mtime — robust to mixed file-name prefixes, unlike a plain name
+// sort), or "" when dir holds no eligible file. Shared by /admin backup and the
+// nightly delivery so both always pick the truly newest dump.
+//
+// minAge skips any file younger than it: the hourly backup.sh gzips straight
+// into the final filename (no temp+rename), so a file written seconds ago may be
+// a dump still in progress — sending it would ship a truncated, un-gunzippable
+// archive that Telegram accepts and we'd log as "sent". The scheduled path passes
+// a few minutes (an older hourly dump always exists); the manual /admin backup
+// passes 0 to keep its exact "newest file, right now" semantics.
+func latestBackupFile(dir string, minAge time.Duration) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	var newest string
+	var newestT time.Time
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		mt := info.ModTime()
+		if minAge > 0 && time.Since(mt) < minAge {
+			continue // too fresh — may be a dump still being written
+		}
+		// Newest by mtime; on an mtime tie, the lexicographically larger name
+		// wins (matches the old name-sort's "last wins", stable after a restore
+		// that flattens mtimes).
+		if newest == "" || mt.After(newestT) || (mt.Equal(newestT) && e.Name() > newest) {
+			newest, newestT = e.Name(), mt
+		}
+	}
+	return newest, nil
+}
+
+// backupLoop delivers the newest DB backup to the configured admin's DM once a
+// day at hm (Asia/Tehran), mirroring gmgnLoop's daily-scheduler shape. It is
+// launched only when a valid BackupAdminID is configured (see startBackground),
+// so it can never run — or reach any chat other than that one id — by default.
+func (b *Bot) backupLoop(ctx context.Context, hm [2]int, adminID int64) {
+	loc, err := time.LoadLocation("Asia/Tehran")
+	if err != nil {
+		slog.Error("backup: cannot load Asia/Tehran", "err", err)
+		loc = time.UTC
+	}
+	for {
+		now := time.Now().In(loc)
+		next := time.Date(now.Year(), now.Month(), now.Day(), hm[0], hm[1], 0, 0, loc)
+		if !next.After(now) {
+			next = next.AddDate(0, 0, 1)
+		}
+		timer := time.NewTimer(time.Until(next))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+			b.sendLatestBackupTo(adminID)
+		}
+	}
+}
+
+// backupMinAge is how long a backup file must have existed before the nightly
+// job will send it, so it can never grab an hourly dump mid-write (see
+// latestBackupFile). An older hourly backup always exists, so this never starves.
+const backupMinAge = 3 * time.Minute
+
+// sendLatestBackupTo sends the newest settled backups/ file to a SINGLE chat id
+// (the nightly admin DM). Best-effort — every failure is logged, never fatal —
+// and it targets exactly one chat: it never iterates users / never broadcasts.
+// On any failure it also pings that same chat with a short text so a silent
+// stall (e.g. the dump one day exceeds Telegram's 50MB bot limit) is noticed.
+func (b *Bot) sendLatestBackupTo(chatID int64) {
+	latest, err := latestBackupFile("backups", backupMinAge)
+	if err != nil || latest == "" {
+		slog.Warn("nightly backup: no file to send", "err", err)
+		b.notifyBackupFail(chatID, "فایلِ بکاپی پیدا نشد")
+		return
+	}
+	f, err := os.Open(filepath.Join("backups", latest))
+	if err != nil {
+		slog.Warn("nightly backup: open failed", "file", latest, "err", err)
+		b.notifyBackupFail(chatID, "بازکردنِ فایلِ بکاپ نشد")
+		return
+	}
+	defer f.Close()
+	// A DB dump can outgrow the 10s default request timeout as the data grows;
+	// give the upload its own generous budget so it scales with the file.
+	if _, err := b.TG.SendDocument(chatID, gotgbot.InputFileByReader(latest, f),
+		&gotgbot.SendDocumentOpts{
+			Caption:     "🌙 بکاپِ خودکارِ شبانه‌ی دیتابیس — " + latest,
+			RequestOpts: &gotgbot.RequestOpts{Timeout: 120 * time.Second},
+		}); err != nil {
+		slog.Warn("nightly backup: send failed", "to", chatID, "err", err)
+		b.notifyBackupFail(chatID, "ارسالِ فایل ناموفق بود (شاید حجمش از حدِ تلگرام بیشتر شده)")
+		return
+	}
+	slog.Info("nightly backup sent", "to", chatID, "file", latest)
+}
+
+// notifyBackupFail best-effort tells the admin chat the nightly backup didn't go
+// through, so absence-of-file is never mistaken for "nothing to back up".
+func (b *Bot) notifyBackupFail(chatID int64, reason string) {
+	_, _ = b.TG.SendMessage(chatID, "⚠️ بکاپِ خودکارِ شبانه ارسال نشد: "+reason, nil)
 }
 
 // aiResponderLoop ports jobs.ai_responser: it drains the GM-group AI queue one
