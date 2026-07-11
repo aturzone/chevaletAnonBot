@@ -11,7 +11,6 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
 
 	"github.com/aturzone/chevaletAnonBot/internal/config"
-	"github.com/aturzone/chevaletAnonBot/internal/encoder"
 )
 
 // sendOutcome is the post-delete_notify_on_END result of send_msg_template:
@@ -83,7 +82,7 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 		return delNone, nil
 	}
 
-	targetChidPlain, _ := encoder.DecodeChevaletID(ud.d.targetChid)
+	targetUID := ud.d.targetUID
 	targetCid := ud.d.targetCid
 	targetMid := ud.d.replyTo
 	wasChannelReply := ud.d.channelReply
@@ -96,11 +95,8 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 	dbctx, cancel := b.bg()
 	defer cancel()
 
-	// target uid
-	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, targetChidPlain)
-	if err != nil {
-		return "", err
-	}
+	// targetUID was resolved when the send flow was set up (start/answer, via
+	// resolveTargetUID); an empty one means the conversation state expired/was lost.
 	if targetUID == "" {
 		return delNone, b.replyHTML(ctx, txtSessionExpired, false)
 	}
@@ -118,13 +114,12 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 
 	// if the user pressed "answer" but replied to a DIFFERENT message, cancel.
 	if targetMid != "" {
-		kind, mChid, mMid, aerr := b.isAnswer(ctx, false)
+		kind, mUID, mMid, aerr := b.isAnswer(ctx, false)
 		if aerr != nil {
 			return "", aerr
 		}
 		if kind == answerMatch {
-			mPlain, _ := encoder.DecodeChevaletID(mChid)
-			if !(mPlain == targetChidPlain && mMid == targetMid) {
+			if !(mUID == targetUID && mMid == targetMid) {
 				return delNone, b.replyHTML(ctx, txtSendingToAnother, false)
 			}
 		}
@@ -139,12 +134,18 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 		return delNone, b.replyText(ctx, txtBlockedYou)
 	}
 
-	// sender's encoded chevaletid (so the markup never leaks the uid/raw chid)
-	senderChid, err := b.DB.GetChevaletIDByUID(dbctx, userid)
+	// Seal the SENDER's uid into an opaque, unlinkable token for the message's
+	// buttons — replaces the keyless EncodeChevaletID, which was reversible by any
+	// recipient once the source is public (S-0002). Two sends -> two nonces -> two
+	// unlinkable tokens; only the bot's key opens them.
+	senderID, perr := strconv.ParseInt(userid, 10, 64)
+	if perr != nil {
+		return "", perr
+	}
+	senderToken, err := b.Tokens.Seal(senderID, nil)
 	if err != nil {
 		return "", err
 	}
-	senderEncChid := encoder.EncodeChevaletID(senderChid)
 
 	// reply / quote calculation (strings, like the Python original; converted to
 	// int64 at the gotgbot boundary in copyToTarget).
@@ -186,7 +187,7 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	keyboard := messageKeyboard(senderEncChid, msg.MessageId, seen)
+	keyboard := messageKeyboard(senderToken, msg.MessageId, seen)
 
 	targetCids, err := b.DB.GetCIDs(dbctx, targetUID)
 	if err != nil {
@@ -232,8 +233,8 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 		ud.d.mediaGroupID = mediaGroupID
 		ud.d.groupMsgs = []*gotgbot.Message{msg}
 		ud.d.groupExpiration = nowSeconds() + config.ExpireAfter
-		// target_chid / reply_to / channel_reply were reset by ud.clear() above.
-		ud.d.groupTargetChid = encoder.EncodeChevaletID(targetChidPlain)
+		// target_uid / reply_to / channel_reply were reset by ud.clear() above.
+		ud.d.groupTargetUID = targetUID
 		ud.d.groupWasChannelReply = wasChannelReply
 		ud.d.groupNotifyMsg = notifyMsg
 		ud.d.groupReplyMarkup = &replyMarkup
@@ -272,14 +273,19 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 		}) // errors ignored, like the Python try/except pass
 	}
 
-	// "sent" + the deletion warning. The callback data carries a fresh encoding
-	// of the target chid plus the copied (and notify) message ids; when notify is
-	// nil the Python f-string produced the literal "None", which we reproduce.
+	// "sent" + the deletion warning. The callback data carries a fresh sealed token
+	// of the TARGET uid (so the sender can delete their message from the target's
+	// chat) plus the copied (and notify) message ids; when notify is nil the Python
+	// f-string produced the literal "None", which we reproduce.
 	notifyPart := "None"
 	if notifyMsg != nil {
 		notifyPart = strconv.FormatInt(notifyMsg.MessageId, 10)
 	}
-	deletionCallbackData := encoder.EncodeChevaletID(targetChidPlain) + "|" +
+	deleteToken, err := b.Tokens.Seal(targetID, nil)
+	if err != nil {
+		return "", err
+	}
+	deletionCallbackData := deleteToken + "|" +
 		strconv.FormatInt(copiedID, 10) + "|" + notifyPart
 	if _, err := b.warningHandle(ctx, wasChannelReply, targetUID, userid, deletionCallbackData); err != nil {
 		return "", err
@@ -441,12 +447,12 @@ func (b *Bot) warningHandle(ctx *ext.Context, wasChannelReply bool, targetUID, u
 }
 
 // packDeleteButtons greedily packs message ids into "delete" buttons whose
-// callback_data ("delete|<encChid>|<mid>|<mid>…") stays within Telegram's 64-byte
+// callback_data ("delete|<token>|<mid>|<mid>…") stays within Telegram's 64-byte
 // limit, then groups the buttons two-per-row. Each id appears exactly once across
 // the buttons, in order. Mirrors handler_templates._warning_handle's packing loop
 // (the layout deleteMsgClbk re-parses), extracted so it can be unit-tested.
-func packDeleteButtons(encChid string, mids []string) [][]gotgbot.InlineKeyboardButton {
-	kbTemplate := func() []string { return []string{"delete", encChid} }
+func packDeleteButtons(token string, mids []string) [][]gotgbot.InlineKeyboardButton {
+	kbTemplate := func() []string { return []string{"delete", token} }
 	isValid := func(rm []string) bool { return len(strings.Join(rm, "|")) <= 64 }
 
 	var buttons []gotgbot.InlineKeyboardButton

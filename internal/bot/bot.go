@@ -40,6 +40,11 @@ type Bot struct {
 	Texts *texts.Loader
 	Dyn   *dynset.Settings
 
+	// Tokens seals/opens the per-emission callback tokens that carry a user id in
+	// button callback_data (replacing the keyless, linkable EncodeChevaletID for
+	// NEW messages; see encoder/token.go). Keyed off BOT_TOKEN + TOKEN_KEYS.
+	Tokens *encoder.TokenCipher
+
 	users      *userStore
 	aiQueue    *aiQueue
 	admins     map[string]bool
@@ -116,12 +121,22 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 		return nil, fmt.Errorf("bot: new bot: %w", err)
 	}
 
+	// Callback-token cipher, keyed off BOT_TOKEN (+ any TOKEN_KEYS). Fail closed:
+	// without a key the bot would emit unprotected/linkable tokens, so refuse to
+	// start rather than silently regress anonymity. (BOT_TOKEN is required, so this
+	// only trips on a misconfigured build.)
+	tokens := encoder.NewTokenCipher(cfg.BotToken, cfg.TokenKeys...)
+	if !tokens.Ready() {
+		return nil, fmt.Errorf("bot: callback-token cipher has no key (BOT_TOKEN missing?)")
+	}
+
 	b := &Bot{
 		TG:         tg,
 		DB:         database,
 		Cfg:        cfg,
 		Texts:      txt,
 		Dyn:        dynset.New("dynamic_settings.json", cfg.AIURL, cfg.AISessionID),
+		Tokens:     tokens,
 		users:      newUserStore(),
 		aiQueue:    newAIQueue(),
 		admins:     make(map[string]bool, len(cfg.Admins)),

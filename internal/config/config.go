@@ -82,6 +82,12 @@ type Config struct {
 	AIEnabled   bool // AI_ENABLED — the GM-group AI auto-reply is OFF unless "true"
 
 	DonationLink string
+
+	// TokenKeys are OPTIONAL extra secrets (TOKEN_KEYS, comma-separated) kept in
+	// the callback-token keyring for rotation: the current key is derived from
+	// BOT_TOKEN, and these older secrets (e.g. a previous BOT_TOKEN) let buttons
+	// minted before a token change still resolve. Empty by default.
+	TokenKeys []string
 }
 
 // Load reads configuration from the process environment. If a .env file exists
@@ -218,6 +224,16 @@ func Load() (*Config, error) {
 	}
 
 	c.DonationLink = req("DONATION_LINK")
+
+	// Optional callback-token rotation keyring (see TokenKeys). Trimmed, blanks
+	// dropped, so "a, ,b" -> ["a","b"].
+	if v := opt("TOKEN_KEYS", ""); v != "" {
+		for _, k := range strings.Split(v, ",") {
+			if k = strings.TrimSpace(k); k != "" {
+				c.TokenKeys = append(c.TokenKeys, k)
+			}
+		}
+	}
 
 	if len(missing) > 0 {
 		errs = append(errs, "missing required environment variables: "+strings.Join(missing, ", "))

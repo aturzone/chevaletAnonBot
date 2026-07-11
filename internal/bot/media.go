@@ -9,7 +9,6 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 
 	"github.com/aturzone/chevaletAnonBot/internal/config"
-	"github.com/aturzone/chevaletAnonBot/internal/encoder"
 )
 
 // handleMedia ports start.handle_media: the top-level handler for media-group
@@ -60,16 +59,11 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 	// add this media to the group
 	ud.d.groupMsgs = append(ud.d.groupMsgs, msg)
 
-	encodedTargetChid := ud.d.groupTargetChid
-	targetChid, _ := encoder.DecodeChevaletID(encodedTargetChid)
+	targetUID := ud.d.groupTargetUID
 
 	dbctx, cancel := b.bg()
 	defer cancel()
 
-	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, targetChid)
-	if err != nil {
-		return err
-	}
 	targetID, err := strconv.ParseInt(targetUID, 10, 64)
 	if err != nil {
 		return err
@@ -173,7 +167,11 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 	}
 	tbd = dedupeOrdered(tbd)
 
-	deletionCallbackData := encodedTargetChid
+	deleteToken, err := b.Tokens.Seal(targetID, nil)
+	if err != nil {
+		return err
+	}
+	deletionCallbackData := deleteToken
 	for _, m := range tbd {
 		deletionCallbackData += "|" + m
 	}

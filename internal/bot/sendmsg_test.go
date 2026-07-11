@@ -10,8 +10,8 @@ import (
 )
 
 // midsFromRows flattens the delete buttons back to their packed message ids
-// (everything after "delete|<encChid>" in each button's callback_data).
-func midsFromRows(t *testing.T, rows [][]gotgbot.InlineKeyboardButton, encChid string) []string {
+// (everything after "delete|<token>" in each button's callback_data).
+func midsFromRows(t *testing.T, rows [][]gotgbot.InlineKeyboardButton, token string) []string {
 	t.Helper()
 	var got []string
 	for _, r := range rows {
@@ -23,8 +23,8 @@ func midsFromRows(t *testing.T, rows [][]gotgbot.InlineKeyboardButton, encChid s
 				t.Errorf("button callback_data %q is %d bytes (>64)", btn.CallbackData, len(btn.CallbackData))
 			}
 			fields := strings.Split(btn.CallbackData, "|")
-			if len(fields) < 3 || fields[0] != "delete" || fields[1] != encChid {
-				t.Fatalf("malformed delete data %q (want delete|%s|...)", btn.CallbackData, encChid)
+			if len(fields) < 3 || fields[0] != "delete" || fields[1] != token {
+				t.Fatalf("malformed delete data %q (want delete|%s|...)", btn.CallbackData, token)
 			}
 			got = append(got, fields[2:]...)
 		}
@@ -43,14 +43,14 @@ func TestPackDeleteButtons(t *testing.T) {
 	}
 
 	// overflow: a long chid so each button holds exactly one mid (1 fits, 2 overflow).
-	encChid := strings.Repeat("A", 52) // delete|<52>|XX = 62 bytes; +|XX = 67 > 64
+	token := strings.Repeat("A", 52) // delete|<52>|XX = 62 bytes; +|XX = 67 > 64
 	mids := []string{"10", "20", "30", "40", "50"}
-	rows = packDeleteButtons(encChid, mids)
+	rows = packDeleteButtons(token, mids)
 	// 5 single-mid buttons -> rows of 2,2,1.
 	if len(rows) != 3 || len(rows[0]) != 2 || len(rows[1]) != 2 || len(rows[2]) != 1 {
 		t.Fatalf("overflow row shape = %v; want [2 2 1]", rowSizes(rows))
 	}
-	got := midsFromRows(t, rows, encChid)
+	got := midsFromRows(t, rows, token)
 	if strings.Join(got, ",") != strings.Join(mids, ",") {
 		t.Errorf("packed mids = %v; want %v (each once, in order)", got, mids)
 	}
