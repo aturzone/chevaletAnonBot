@@ -10,6 +10,8 @@ written in Go (`gotgbot` + `pgx`/PostgreSQL). The bot's interface is in Persian.
 > This is the Go implementation: a faithful, line-by-line port of an earlier
 > Python bot, verified for behavioral parity before release.
 
+Friend of mine [hamid](https://github.com/zmn-hamid) was not only a programmer but also the initiator of this project, and wherever this project reaches or however much it progresses in the open source world, it is indebted to this person and will always have a contribution to the development of this project.
+
 ## How it works
 
 Every Telegram user has a numeric user id. To protect privacy, the bot never
