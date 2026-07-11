@@ -32,9 +32,9 @@ func (b *Bot) otherMessagesTemplate(ctx *ext.Context) error {
 
 // isAnswer ports handler_templates.is_answer. It inspects the replied-to
 // message: if that is one of the bot's delivered messages (carrying an "answer|"
-// button), it resolves the encoded target chevaletid and the original message
-// id. warnWrongReply controls the "you must reply to the anonymous message
-// itself" hint, exactly as the Python `_warn_wrong_reply` flag.
+// button), it resolves the target user id and the original message id.
+// warnWrongReply controls the "you must reply to the anonymous message itself"
+// hint, exactly as the Python `_warn_wrong_reply` flag.
 func (b *Bot) isAnswer(ctx *ext.Context, warnWrongReply bool) (answerKind, string, string, error) {
 	msg := ctx.EffectiveMessage
 	reply := msg.ReplyToMessage
@@ -53,7 +53,7 @@ func (b *Bot) isAnswer(ctx *ext.Context, warnWrongReply bool) (answerKind, strin
 					}
 					token, targetMid := parts[1], parts[2]
 					dbctx, cancel := b.bg()
-					chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+					uid, ok, err := b.resolveTargetUID(dbctx, msg, token)
 					cancel()
 					if err != nil {
 						return answerNone, "", "", err
@@ -61,7 +61,7 @@ func (b *Bot) isAnswer(ctx *ext.Context, warnWrongReply bool) (answerKind, strin
 					if !ok {
 						return answerEnd, "", "", nil
 					}
-					return answerMatch, chid, targetMid, nil
+					return answerMatch, uid, targetMid, nil
 				}
 			}
 		}
@@ -130,7 +130,7 @@ func authorSignature(origin gotgbot.MessageOrigin) string {
 // an author-specific link when the post had an author signature, and resolves it
 // to a target. Returns answerNone (Python False, no external reply), answerEnd
 // (Python END), or answerMatch with (target_cid, encoded_chid).
-func (b *Bot) isReplyToChannel(ctx *ext.Context) (kind answerKind, targetCid, encChid string, err error) {
+func (b *Bot) isReplyToChannel(ctx *ext.Context) (kind answerKind, targetCid, uid string, err error) {
 	msg := ctx.EffectiveMessage
 	externalReply := msg.ExternalReply
 	if externalReply == nil || externalReply.Chat == nil {
@@ -198,19 +198,18 @@ func (b *Bot) isReplyToChannel(ctx *ext.Context) (kind answerKind, targetCid, en
 		return answerEnd, "", "", b.replyText(ctx, txtLinkDeletedOrChanged)
 	}
 
+	// Ensure the target still has a chevaletid (mint if missing) — preserves the
+	// original side effect for any legacy path that resolves by chevaletid.
 	targetChid, derr := b.DB.GetChevaletIDByUID(dbctx, targetUID)
 	if derr != nil {
 		return answerNone, "", "", derr
 	}
 	if targetChid == "" {
-		targetChid = encoder.GenerateChevaletID()
-		// As in handle_cid_or_chid: set_chevaletid always succeeded in Python, so
-		// a real failure propagates to the central error handler here.
-		if derr := b.DB.SetChevaletID(dbctx, targetUID, targetChid); derr != nil {
+		if derr := b.DB.SetChevaletID(dbctx, targetUID, encoder.GenerateChevaletID()); derr != nil {
 			return answerNone, "", "", derr
 		}
 	}
-	return answerMatch, targetCid, encoder.EncodeChevaletID(targetChid), nil
+	return answerMatch, targetCid, targetUID, nil
 }
 
 // reMatches reports whether re matches the lower-cased haystack (the Python code
@@ -254,7 +253,7 @@ func firstURLButtonCID(re *regexp.Regexp, keyboard [][]gotgbot.InlineKeyboardBut
 // the Python END return (something was handled); false falls through.
 func (b *Bot) checkIfAutoreply(ctx *ext.Context, userid string) (handled bool, err error) {
 	// private reply
-	kind, chid, mid, err := b.isAnswer(ctx, true)
+	kind, targetUID, mid, err := b.isAnswer(ctx, true)
 	if err != nil {
 		return false, err
 	}
@@ -264,7 +263,7 @@ func (b *Bot) checkIfAutoreply(ctx *ext.Context, userid string) (handled bool, e
 	if kind == answerMatch {
 		ud := b.ud(ctx)
 		ud.d.targetCid = ""
-		ud.d.targetChid = chid
+		ud.d.targetUID = targetUID
 		ud.d.replyTo = mid
 		ud.d.channelReply = false
 		if _, e := b.sendMsgTemplate(ctx, userid); e != nil {
@@ -274,7 +273,7 @@ func (b *Bot) checkIfAutoreply(ctx *ext.Context, userid string) (handled bool, e
 	}
 
 	// channel reply
-	ckind, cCid, cChid, err := b.isReplyToChannel(ctx)
+	ckind, cCid, cUID, err := b.isReplyToChannel(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -284,7 +283,7 @@ func (b *Bot) checkIfAutoreply(ctx *ext.Context, userid string) (handled bool, e
 	if ckind == answerMatch {
 		ud := b.ud(ctx)
 		ud.d.targetCid = cCid
-		ud.d.targetChid = cChid
+		ud.d.targetUID = cUID
 		ud.d.replyTo = ""
 		ud.d.channelReply = true
 		if _, e := b.sendMsgTemplate(ctx, userid); e != nil {

@@ -67,7 +67,7 @@ func (u *userData) allowSend() bool {
 // Empty string / nil / false / zero stand in for Python's missing-key / None.
 type convData struct {
 	// single-message send flow (set by start_cmd / answer, read by send_msg_template)
-	targetChid   string // "target_chid": already-encoded chevaletid
+	targetUID    string // "target_uid": the resolved target user id (server-side only)
 	targetCid    string // "target_cid": cid, or "" when not a /start send
 	replyTo      string // "reply_to": target message id, or "" when not an answer
 	channelReply bool   // "channel_reply": True only for reply-to-channel sends
@@ -76,7 +76,7 @@ type convData struct {
 	mediaGroupID         string                        // "media_group_id"
 	groupMsgs            []*gotgbot.Message            // "group_msgs"
 	groupExpiration      float64                       // "group_expiration": unix seconds, 0 = unset
-	groupTargetChid      string                        // "group_target_chid": encoded
+	groupTargetUID       string                        // "group_target_uid": resolved target user id
 	groupWasChannelReply bool                          // "group_was_channel_reply"
 	groupNotifyMsg       *gotgbot.Message              // "group_notify_msg"
 	groupReplyMarkup     *gotgbot.InlineKeyboardMarkup // "group_reply_markup"

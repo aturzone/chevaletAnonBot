@@ -36,7 +36,7 @@ func answer(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	dbctx, cancel := b.bg()
 	defer cancel()
 
-	chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token)
 	if err != nil {
 		return err
 	}
@@ -44,11 +44,6 @@ func answer(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 		return handlers.EndConversation()
 	}
 
-	plain, _ := encoder.DecodeChevaletID(chid)
-	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, plain)
-	if err != nil {
-		return err
-	}
 	blocked, err := b.DB.IsBlocked(dbctx, targetUID, userid)
 	if err != nil {
 		return err
@@ -59,7 +54,7 @@ func answer(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	}
 
 	ud := b.ud(ctx)
-	ud.d.targetChid = chid
+	ud.d.targetUID = targetUID
 	ud.d.replyTo = targetMid
 
 	if _, err := msg.Reply(tg, txtAnswerPrompt, &gotgbot.SendMessageOpts{
@@ -88,17 +83,12 @@ func seen(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	dbctx, cancel := b.bg()
 	defer cancel()
 
-	chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return handlers.EndConversation()
-	}
-	plain, _ := encoder.DecodeChevaletID(chid)
-	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, plain)
-	if err != nil {
-		return err
 	}
 
 	blocked, err := b.DB.IsBlocked(dbctx, targetUID, userid)
@@ -170,17 +160,12 @@ func block(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	dbctx, cancel := b.bg()
 	defer cancel()
 
-	chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return handlers.EndConversation()
-	}
-	plain, _ := encoder.DecodeChevaletID(chid)
-	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, plain)
-	if err != nil {
-		return err
 	}
 
 	swap := func() {
@@ -237,17 +222,12 @@ func unblock(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	dbctx, cancel := b.bg()
 	defer cancel()
 
-	chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return handlers.EndConversation()
-	}
-	plain, _ := encoder.DecodeChevaletID(chid)
-	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, plain)
-	if err != nil {
-		return err
 	}
 
 	swap := func() {
@@ -305,7 +285,7 @@ func report(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
 
 	dbctx, cancel := b.bg()
 	defer cancel()
-	_, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	_, ok, err := b.resolveTargetUID(dbctx, msg, token)
 	if err != nil {
 		return err
 	}
@@ -343,17 +323,12 @@ func reportConfirmYes(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) 
 
 	dbctx, cancel := b.bg()
 	defer cancel()
-	chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return handlers.EndConversation()
-	}
-	plain, _ := encoder.DecodeChevaletID(chid)
-	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, plain)
-	if err != nil {
-		return err
 	}
 
 	// delete the confirmation message
@@ -436,17 +411,12 @@ func deleteMsgClbk(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
 
 	dbctx, cancel := b.bg()
 	defer cancel()
-	chid, ok, err := b.handleCIDOrChID(dbctx, msg, token)
+	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return handlers.EndConversation()
-	}
-	plain, _ := encoder.DecodeChevaletID(chid)
-	targetUID, err := b.DB.GetUIDByChevaletID(dbctx, plain)
-	if err != nil {
-		return err
 	}
 	if targetUID == "" {
 		// Python asserted target_uid; a missing one is an unexpected state.

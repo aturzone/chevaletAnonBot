@@ -65,13 +65,17 @@ func (b *Bot) startUnblock(tg *gotgbot.Bot, ctx *ext.Context, userid, arg string
 		if _, err := b.DB.RemoveBlock(dbctx, userid, targetUID); err != nil {
 			return err
 		}
-		chid, err := b.DB.GetChevaletIDByUID(dbctx, targetUID)
+		tid, err := strconv.ParseInt(targetUID, 10, 64)
+		if err != nil {
+			return err
+		}
+		token, err := b.Tokens.Seal(tid, nil)
 		if err != nil {
 			return err
 		}
 		text := "این یوزر برات آنبلاک شد:\n" + b.getUsername(targetUID) + " | " + hrefUser(targetUID, "")
 		markup := gotgbot.InlineKeyboardMarkup{InlineKeyboard: [][]gotgbot.InlineKeyboardButton{{
-			cb(btnBlockAgain, "block|"+encoder.EncodeChevaletID(chid)),
+			cb(btnBlockAgain, "block|"+token),
 		}}}
 		if _, err := msg.Reply(tg, text, &gotgbot.SendMessageOpts{ParseMode: "HTML", ReplyMarkup: markup}); err != nil {
 			return err
@@ -114,7 +118,6 @@ func (b *Bot) startConnect(tg *gotgbot.Bot, ctx *ext.Context, userid, targetCid 
 			return err
 		}
 	}
-	encChid := encoder.EncodeChevaletID(targetChid)
 
 	blocked, err := b.DB.IsBlocked(dbctx, targetUID, userid)
 	if err != nil {
@@ -145,7 +148,7 @@ func (b *Bot) startConnect(tg *gotgbot.Bot, ctx *ext.Context, userid, targetCid 
 
 	ud := b.ud(ctx)
 	ud.d.targetCid = targetCid
-	ud.d.targetChid = encChid // already encoded
+	ud.d.targetUID = targetUID
 	ud.d.replyTo = ""
 
 	selfPrefix := ""
