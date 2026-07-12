@@ -167,7 +167,9 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 	}
 	tbd = dedupeOrdered(tbd)
 
-	deleteToken, err := b.Tokens.Seal(targetID, nil)
+	// Bind the deletable id set into the token (S-0001), matching how deleteMsgClbk
+	// re-derives the aad from the harvested button ids.
+	deleteToken, err := b.Tokens.Seal(targetID, deleteAAD(tbd))
 	if err != nil {
 		return err
 	}

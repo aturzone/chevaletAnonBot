@@ -69,7 +69,8 @@ func (b *Bot) startUnblock(tg *gotgbot.Bot, ctx *ext.Context, userid, arg string
 		if err != nil {
 			return err
 		}
-		token, err := b.Tokens.Seal(tid, nil)
+		// non-nil block aad — matches how block/unblock resolve (S-0001).
+		token, err := b.Tokens.Seal(tid, blockAAD())
 		if err != nil {
 			return err
 		}

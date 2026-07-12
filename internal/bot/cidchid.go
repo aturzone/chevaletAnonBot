@@ -16,6 +16,20 @@ import (
 //  2. an OLD encoded chevaletid — DecodeChevaletID -> chevaletid -> uid;
 //  3. a plain cid on very old (pre-chevaletid) buttons -> the link owner's uid.
 //
+// aad is the purpose-binding for the current token generation (see callbackaad.go):
+// the acted-on message id for answer/seen/report, a constant for block/unblock,
+// the whole id set for delete. It authenticates the id(s) embedded in the SAME
+// callback_data so a tampered id fails Open — the S-0001 fix. Callers MUST pass
+// the non-nil aad matching how the button was minted.
+//
+//   - Open(token, aad) matches a current, correctly-bound token.
+//   - If that fails AND aad != nil, Open(token, nil) is a back-compat BRIDGE for
+//     buttons delivered before mid-binding shipped (they were sealed with nil).
+//     Those resolve UNBOUND, exactly as they did before — the frozen residual of
+//     S-0001 for already-delivered buttons, which ages out as messages do. It is
+//     safe: a current token is sealed with a non-nil aad, so it never opens under
+//     nil; only genuinely-old tokens take the bridge.
+//
 // Trying the sealed cipher FIRST is safe: its 64-bit MAC makes a legacy token
 // opening as a new one a ~2^-64 event, and legacy/garbage inputs return false so
 // we fall through. (Ported/renamed from handle_cid_or_chid, which returned an
@@ -24,10 +38,17 @@ import (
 //
 // ok=false with err==nil is the "link gone" END sentinel: a "link changed" reply
 // was already sent and the caller must stop. A non-nil error routes to onError.
-func (b *Bot) resolveTargetUID(ctx context.Context, msg *gotgbot.Message, token string) (uid string, ok bool, err error) {
-	// (1) NEW sealed token.
-	if u, good := b.Tokens.Open(token, nil); good {
+func (b *Bot) resolveTargetUID(ctx context.Context, msg *gotgbot.Message, token string, aad []byte) (uid string, ok bool, err error) {
+	// (1) NEW sealed token, bound to this callback's id(s) via aad.
+	if u, good := b.Tokens.Open(token, aad); good {
 		return strconv.FormatInt(u, 10), true, nil
+	}
+	// (1b) BRIDGE: a pre-mid-binding token was sealed with nil aad. Only reachable
+	// for genuinely-old buttons — a current token's non-nil aad never opens here.
+	if aad != nil {
+		if u, good := b.Tokens.Open(token, nil); good {
+			return strconv.FormatInt(u, 10), true, nil
+		}
 	}
 
 	// (2) OLD encoded chevaletid: decodes cleanly AND resolves to a user.
