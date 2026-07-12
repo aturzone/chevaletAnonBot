@@ -43,29 +43,34 @@ func cancelMarkup() *gotgbot.InlineKeyboardMarkup {
 
 // messageKeyboard builds the inline keyboard placed under every delivered
 // anonymous message, mirroring the first two rows of reply_markup_keyboard in
-// handler_templates.send_msg_template. senderToken is the sealed, unlinkable
-// token carrying the sender's uid; mid is the sender's message id. When seen is true
-// the "mark as seen" button is inserted at the front of the first row, exactly
-// as the Python `reply_markup_keyboard[0].insert(0, ...)`.
+// handler_templates.send_msg_template. mid is the sender's message id. When seen
+// is true the "mark as seen" button is inserted at the front of the first row,
+// exactly as the Python `reply_markup_keyboard[0].insert(0, ...)`.
+//
+// Two sealed tokens of the sender's uid are used (both unlinkable; see
+// callbackaad.go). tokenMid is bound to mid via aad and carries the id-acting
+// verbs (answer/seen/report) so a tampered id fails Open — the S-0001 fix.
+// tokenBlock is bound to the constant blockAAD (non-nil) and carries block, which
+// acts on no message id and is reused across the block<->unblock swap.
 //
 // The caller appends the optional "sent with link N (cid)" row and the donation
 // row, matching the order the Python code assembles them.
-func messageKeyboard(senderToken string, mid int64, seen bool) [][]gotgbot.InlineKeyboardButton {
+func messageKeyboard(tokenMid, tokenBlock string, mid int64, seen bool) [][]gotgbot.InlineKeyboardButton {
 	midStr := strconv.FormatInt(mid, 10)
 	firstRow := []gotgbot.InlineKeyboardButton{
-		cb(msgBtnReply, "answer|"+senderToken+"|"+midStr),
+		cb(msgBtnReply, "answer|"+tokenMid+"|"+midStr),
 	}
 	if seen {
 		firstRow = append([]gotgbot.InlineKeyboardButton{
-			cb(msgBtnSeen, "seen|"+senderToken+"|"+midStr),
+			cb(msgBtnSeen, "seen|"+tokenMid+"|"+midStr),
 		}, firstRow...)
 	}
 	return [][]gotgbot.InlineKeyboardButton{
 		firstRow,
 		{
-			cb(msgBtnReport, "report|"+senderToken+"|"+midStr),
+			cb(msgBtnReport, "report|"+tokenMid+"|"+midStr),
 			cb(" ", "no-callback"),
-			cb(msgBtnBlock, "block|"+senderToken),
+			cb(msgBtnBlock, "block|"+tokenBlock),
 		},
 	}
 }

@@ -53,7 +53,7 @@ func (b *Bot) isAnswer(ctx *ext.Context, warnWrongReply bool) (answerKind, strin
 					}
 					token, targetMid := parts[1], parts[2]
 					dbctx, cancel := b.bg()
-					uid, ok, err := b.resolveTargetUID(dbctx, msg, token)
+					uid, ok, err := b.resolveTargetUID(dbctx, msg, token, midAAD(targetMid))
 					cancel()
 					if err != nil {
 						return answerNone, "", "", err

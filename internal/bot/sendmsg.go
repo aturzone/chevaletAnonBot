@@ -134,15 +134,25 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 		return delNone, b.replyText(ctx, txtBlockedYou)
 	}
 
-	// Seal the SENDER's uid into an opaque, unlinkable token for the message's
+	// Seal the SENDER's uid into opaque, unlinkable tokens for the message's
 	// buttons — replaces the keyless EncodeChevaletID, which was reversible by any
 	// recipient once the source is public (S-0002). Two sends -> two nonces -> two
 	// unlinkable tokens; only the bot's key opens them.
+	//
+	// Two tokens, both non-nil aad (S-0001): tokenMid is bound to THIS message's id
+	// and carries answer/seen/report (so a tampered id fails Open); tokenBlock is
+	// bound to the constant block aad and carries block (no id to act on). A single
+	// nil-sealed token would be a mid-agnostic skeleton key — see callbackaad.go.
 	senderID, perr := strconv.ParseInt(userid, 10, 64)
 	if perr != nil {
 		return "", perr
 	}
-	senderToken, err := b.Tokens.Seal(senderID, nil)
+	midStr := strconv.FormatInt(msg.MessageId, 10)
+	senderTokenMid, err := b.Tokens.Seal(senderID, midAAD(midStr))
+	if err != nil {
+		return "", err
+	}
+	senderTokenBlock, err := b.Tokens.Seal(senderID, blockAAD())
 	if err != nil {
 		return "", err
 	}
@@ -187,7 +197,7 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	keyboard := messageKeyboard(senderToken, msg.MessageId, seen)
+	keyboard := messageKeyboard(senderTokenMid, senderTokenBlock, msg.MessageId, seen)
 
 	targetCids, err := b.DB.GetCIDs(dbctx, targetUID)
 	if err != nil {
@@ -281,12 +291,15 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 	if notifyMsg != nil {
 		notifyPart = strconv.FormatInt(notifyMsg.MessageId, 10)
 	}
-	deleteToken, err := b.Tokens.Seal(targetID, nil)
+	// Bind the deletable id set into the token (S-0001): deleteMsgClbk re-derives
+	// the SAME aad by harvesting these ids back from the buttons, so a tampered id
+	// set fails Open. The "None" slot is kept verbatim — deleteAAD hashes it too.
+	delMids := []string{strconv.FormatInt(copiedID, 10), notifyPart}
+	deleteToken, err := b.Tokens.Seal(targetID, deleteAAD(delMids))
 	if err != nil {
 		return "", err
 	}
-	deletionCallbackData := deleteToken + "|" +
-		strconv.FormatInt(copiedID, 10) + "|" + notifyPart
+	deletionCallbackData := deleteToken + "|" + delMids[0] + "|" + delMids[1]
 	if _, err := b.warningHandle(ctx, wasChannelReply, targetUID, userid, deletionCallbackData); err != nil {
 		return "", err
 	}

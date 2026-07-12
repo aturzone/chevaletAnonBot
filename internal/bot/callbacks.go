@@ -36,7 +36,7 @@ func answer(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	dbctx, cancel := b.bg()
 	defer cancel()
 
-	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token)
+	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token, midAAD(targetMid))
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func seen(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	dbctx, cancel := b.bg()
 	defer cancel()
 
-	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token)
+	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token, midAAD(targetMid))
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func block(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	dbctx, cancel := b.bg()
 	defer cancel()
 
-	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token)
+	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token, blockAAD())
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func unblock(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	dbctx, cancel := b.bg()
 	defer cancel()
 
-	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token)
+	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token, blockAAD())
 	if err != nil {
 		return err
 	}
@@ -285,7 +285,7 @@ func report(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
 
 	dbctx, cancel := b.bg()
 	defer cancel()
-	_, ok, err := b.resolveTargetUID(dbctx, msg, token)
+	_, ok, err := b.resolveTargetUID(dbctx, msg, token, midAAD(targetMid))
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func reportConfirmYes(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) 
 
 	dbctx, cancel := b.bg()
 	defer cancel()
-	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token)
+	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token, midAAD(targetMid))
 	if err != nil {
 		return err
 	}
@@ -409,9 +409,31 @@ func deleteMsgClbk(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
 	token := parts[1]
 	msg := ctx.EffectiveMessage
 
+	// Harvest the message ids from EVERY button (callback_data fields 2+) FIRST:
+	// they are the aad the delete token was sealed under (S-0001), so a tampered
+	// id set makes resolveTargetUID fail below. deleteAAD dedups + sorts, so the
+	// harvest order and how the ids were packed across buttons don't matter.
+	seen := map[string]struct{}{}
+	var harvested []string
+	if msg.ReplyMarkup != nil {
+		for _, row := range msg.ReplyMarkup.InlineKeyboard {
+			for _, btn := range row {
+				flds := strings.Split(btn.CallbackData, "|")
+				if len(flds) > 2 {
+					for _, m := range flds[2:] {
+						if _, dup := seen[m]; !dup {
+							seen[m] = struct{}{}
+							harvested = append(harvested, m)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	dbctx, cancel := b.bg()
 	defer cancel()
-	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token)
+	targetUID, ok, err := b.resolveTargetUID(dbctx, msg, token, deleteAAD(harvested))
 	if err != nil {
 		return err
 	}
@@ -427,20 +449,6 @@ func deleteMsgClbk(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
 		return perr
 	}
 
-	// collect the message ids from EVERY button (callback_data split, fields 2+).
-	seen := map[string]struct{}{}
-	if msg.ReplyMarkup != nil {
-		for _, row := range msg.ReplyMarkup.InlineKeyboard {
-			for _, btn := range row {
-				flds := strings.Split(btn.CallbackData, "|")
-				if len(flds) > 2 {
-					for _, m := range flds[2:] {
-						seen[m] = struct{}{}
-					}
-				}
-			}
-		}
-	}
 	for m := range seen {
 		if mid, e := strconv.ParseInt(m, 10, 64); e == nil {
 			_, _ = tg.DeleteMessage(targetID, mid, nil) // "None" and bad ids fail silently
