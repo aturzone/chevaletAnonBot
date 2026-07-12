@@ -19,7 +19,7 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 	msg := ctx.EffectiveMessage
 	ud := b.ud(ctx)
 
-	slog.Info("handleMedia", "kind", kindOf(msg), "groupId", msg.MediaGroupId,
+	slog.Debug("handleMedia", "kind", kindOf(msg), "groupId", msg.MediaGroupId,
 		"haveGroup", len(ud.d.groupMsgs) > 0, "match", msg.MediaGroupId == ud.d.mediaGroupID)
 
 	// Not part of a tracked group (or a different group) -> treat as a fresh
@@ -100,7 +100,7 @@ func handleMedia(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error
 	for _, sm := range sentMessages {
 		ud.d.sentMedias = append(ud.d.sentMedias, strconv.FormatInt(sm.MessageId, 10))
 	}
-	slog.Info("media group copied to target", "type", mediaType(msgs[0]), "items", len(sentMessages))
+	slog.Debug("media group copied to target", "type", mediaType(msgs[0]), "items", len(sentMessages))
 
 	// decide which message(s) to tag and with which tag.
 	mt := mediaType(msgs[0])
