@@ -13,6 +13,12 @@ dynamic_settings.json
 .idea/
 .claude/settings.local.json
 
+# Internal review/analysis artifacts (agent-generated) — NEVER publish: they map
+# the attack surface and enumerate open vulnerabilities. Kept locally, untracked.
+.security/
+.sentinel/
+.master-claude/
+
 # Docker / backups
 backups/
 *.sql

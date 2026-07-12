@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-const testBotToken = "7133040550:AA-fake-token-for-tests-only_xyz"
+const testBotToken = "1234567890:AA-fake-token-for-tests-only_xyz"
 
 func TestTokenRoundTrip(t *testing.T) {
 	tc := NewTokenCipher(testBotToken)
-	for _, uid := range []int64{1, 84581926, 6857450344, 999999999999, 1<<52 - 1, 0} {
+	for _, uid := range []int64{1, 1000000001, 1000000002, 999999999999, 1<<52 - 1, 0} {
 		tok, err := tc.Seal(uid, nil)
 		if err != nil {
 			t.Fatalf("Seal(%d): %v", uid, err)
@@ -24,7 +24,7 @@ func TestTokenRoundTrip(t *testing.T) {
 
 func TestTokenUnlinkable(t *testing.T) {
 	tc := NewTokenCipher(testBotToken)
-	uid := int64(6857450344)
+	uid := int64(1000000002)
 	t1, _ := tc.Seal(uid, nil)
 	t2, _ := tc.Seal(uid, nil)
 	// Same sender, two messages -> the tokens in the buttons MUST differ (this is
@@ -44,7 +44,7 @@ func TestTokenUnlinkable(t *testing.T) {
 
 func TestTokenTamperRejected(t *testing.T) {
 	tc := NewTokenCipher(testBotToken)
-	tok, _ := tc.Seal(6857450344, nil)
+	tok, _ := tc.Seal(1000000002, nil)
 	b := []byte(tok)
 	for _, i := range []int{0, len(b) / 2, len(b) - 1} {
 		orig := b[i]
@@ -58,7 +58,7 @@ func TestTokenTamperRejected(t *testing.T) {
 
 func TestTokenAAD(t *testing.T) {
 	tc := NewTokenCipher(testBotToken)
-	uid := int64(84581926)
+	uid := int64(1000000001)
 	tok, _ := tc.Seal(uid, []byte("624600")) // e.g. bound to a message id
 	if got, ok := tc.Open(tok, []byte("624600")); !ok || got != uid {
 		t.Errorf("Open with matching aad = (%d,%v); want (%d,true)", got, ok, uid)
@@ -74,7 +74,7 @@ func TestTokenAAD(t *testing.T) {
 func TestTokenWrongKey(t *testing.T) {
 	a := NewTokenCipher(testBotToken)
 	b := NewTokenCipher("a-completely-different-secret")
-	tok, _ := a.Seal(6857450344, nil)
+	tok, _ := a.Seal(1000000002, nil)
 	if _, ok := b.Open(tok, nil); ok {
 		t.Error("a token sealed under key A opened under key B")
 	}
@@ -82,16 +82,16 @@ func TestTokenWrongKey(t *testing.T) {
 
 func TestTokenKeyring(t *testing.T) {
 	old := NewTokenCipher("old-secret")
-	tokOld, _ := old.Seal(6857450344, nil)
+	tokOld, _ := old.Seal(1000000002, nil)
 
 	// After rotation the current key is "new-secret" but "old-secret" stays in the
 	// ring, so buttons minted before rotation still resolve.
 	rotated := NewTokenCipher("new-secret", "old-secret")
-	if got, ok := rotated.Open(tokOld, nil); !ok || got != 6857450344 {
+	if got, ok := rotated.Open(tokOld, nil); !ok || got != 1000000002 {
 		t.Errorf("rotated ring failed to open an old-key token: (%d,%v)", got, ok)
 	}
 	// New seals use the current (first) key, which the OLD cipher can't open.
-	tokNew, _ := rotated.Seal(6857450344, nil)
+	tokNew, _ := rotated.Seal(1000000002, nil)
 	if _, ok := old.Open(tokNew, nil); ok {
 		t.Error("old cipher opened a token sealed with the new current key")
 	}
