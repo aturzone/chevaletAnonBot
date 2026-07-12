@@ -42,7 +42,7 @@ docker inspect telegram-bot-db --format '{{range $k,$_ := .NetworkSettings.Netwo
 ```
 
 **3. Create `deploy/go/.env.prod`** = a copy of the **production** `.env`
-(`/home/hamid/chevaletbot/.env`). Keep all the real values (BOT_TOKEN,
+(`/home/<user>/chevaletbot/.env`). Keep all the real values (BOT_TOKEN,
 DB_NAME/DB_USER/DB_PASS for telegram-bot-db, ADMINS, REPORT_CHAT_ID,
 ERROR_CHAT_ID, GM_GROUP_ID, AI_URL, DONATION_LINK, HEALTH_PORT, …).
 `DB_HOST` is forced to `telegram-bot-db` by the compose, so its value here
@@ -50,7 +50,7 @@ doesn't matter. `chmod 600 deploy/go/.env.prod`.
 
 **4. AI dynamic settings continuity** (optional): either
 ```sh
-cp /home/hamid/chevaletbot/dynamic_settings.json deploy/go/prod-dynamic_settings.json
+cp /home/<user>/chevaletbot/dynamic_settings.json deploy/go/prod-dynamic_settings.json
 ```
 or set `AI_URL` / `AI_SESSION_ID` in `.env.prod` (the Go bot falls back to those
 when the file is absent) and remove the `volumes:` line in the prod compose.
