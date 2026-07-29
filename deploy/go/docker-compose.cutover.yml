@@ -10,7 +10,7 @@
 # variable can be silently dropped.
 #
 # Run:
-#   docker compose -p chevalet-go-prod -f deploy/go/docker-compose.cutover.yml up -d --build
+#   docker compose -p go -f deploy/go/docker-compose.cutover.yml up -d --build
 # Rollback (instant): docker stop chevalet-go-bot-prod && docker start telegram-bot
 services:
   go-bot:

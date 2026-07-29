@@ -14,7 +14,7 @@
 #                             (find it — see CUTOVER.md pre-flight step 2)
 #
 # Run with:
-#   docker compose --env-file deploy/go/.env.prod -p chevalet-go-prod \
+#   docker compose --env-file deploy/go/.env.prod -p go \
 #     -f deploy/go/docker-compose.prod.yml up -d --build
 
 services:

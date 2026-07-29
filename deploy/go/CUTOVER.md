@@ -57,7 +57,7 @@ when the file is absent) and remove the `volumes:` line in the prod compose.
 
 **5. Pre-build the Go image** so the cutover itself is instant:
 ```sh
-docker compose --env-file deploy/go/.env.prod -p chevalet-go-prod \
+docker compose --env-file deploy/go/.env.prod -p go \
   -f deploy/go/docker-compose.prod.yml build
 ```
 
@@ -79,7 +79,7 @@ docker stop telegram-bot
 
 **2. Start the Go bot** on the shared DB:
 ```sh
-docker compose --env-file deploy/go/.env.prod -p chevalet-go-prod \
+docker compose --env-file deploy/go/.env.prod -p go \
   -f deploy/go/docker-compose.prod.yml up -d
 ```
 
@@ -105,7 +105,7 @@ docker inspect chevalet-go-bot-prod --format '{{.State.Health.Status}}'   # -> h
 ## Rollback (instant — if anything looks wrong)
 
 ```sh
-docker compose -p chevalet-go-prod -f deploy/go/docker-compose.prod.yml down
+docker compose -p go -f deploy/go/docker-compose.prod.yml down
 docker start telegram-bot
 ```
 Same database, no data lost — the Python bot resumes polling within seconds.
