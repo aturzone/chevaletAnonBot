@@ -48,6 +48,13 @@ func errMessageIDInvalid(err error) bool { return descContains(err, "MESSAGE_ID_
 // errQueryTooOld: "Bad Request: query is too old and response timeout expired …".
 func errQueryTooOld(err error) bool { return descContains(err, "query is too old") }
 
+// errMessageNotModified: "Bad Request: message is not modified: specified new
+// message content and reply markup are exactly the same …". Harmless — it just
+// means the user re-triggered a menu/state they were already on (e.g. a double
+// tap, or pressing "back" while already at that menu), so the edit is a no-op
+// Telegram refuses rather than a real failure.
+func errMessageNotModified(err error) bool { return descContains(err, "message is not modified") }
+
 // errForbidden matches any HTTP 403 "Forbidden: …" Telegram error, mirroring the
 // PTB `except Forbidden` in is_reply_to_channel (e.g. a private channel the bot
 // was never added to).
