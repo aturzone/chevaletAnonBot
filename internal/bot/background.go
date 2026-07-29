@@ -231,6 +231,23 @@ func (b *Bot) backupLoop(ctx context.Context, hm [2]int, adminID int64) {
 // latestBackupFile). An older hourly backup always exists, so this never starves.
 const backupMinAge = 3 * time.Minute
 
+// nightlySentMarker is (re)written to the backups dir after a successful
+// nightly send. deploy/go/nightly-backup-backstop.sh — a host-side cron that
+// re-sends the backup if this job silently failed — checks this file's mtime
+// instead of grepping `docker logs`: `docker logs --since <duration>` proved
+// unreliable in production (it returned zero lines regardless of the window,
+// even moments after this job logged successfully), which made the backstop
+// fire every night and double-send. A plain mtime check has no such failure
+// mode and needs no log driver cooperation.
+const nightlySentMarker = ".nightly-backup-sent"
+
+// touchNightlySentMarker (re)creates the marker file in dir, refreshing its
+// mtime to now. Best-effort: a write failure is the caller's to log, not fatal
+// (the Telegram send already succeeded either way).
+func touchNightlySentMarker(dir string) error {
+	return os.WriteFile(filepath.Join(dir, nightlySentMarker), nil, 0o600)
+}
+
 // sendLatestBackupTo sends the newest settled backups/ file to a SINGLE chat id
 // (the nightly admin DM). Best-effort — every failure is logged, never fatal —
 // and it targets exactly one chat: it never iterates users / never broadcasts.
@@ -262,6 +279,9 @@ func (b *Bot) sendLatestBackupTo(chatID int64) {
 		return
 	}
 	slog.Info("nightly backup sent", "to", chatID, "file", latest)
+	if err := touchNightlySentMarker("backups"); err != nil {
+		slog.Warn("nightly backup: marker write failed", "err", err)
+	}
 }
 
 // notifyBackupFail best-effort tells the admin chat the nightly backup didn't go
