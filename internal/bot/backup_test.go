@@ -63,3 +63,38 @@ func TestLatestBackupFile(t *testing.T) {
 		t.Error("missing dir: want an error, got nil")
 	}
 }
+
+// TestTouchNightlySentMarker locks the marker file's name and its
+// create-or-refresh behavior: deploy/go/nightly-backup-backstop.sh dedupes by
+// checking this file's mtime, so a stale marker must never linger unrefreshed
+// and a repeat call must always bump the mtime forward (not just "create once").
+func TestTouchNightlySentMarker(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, nightlySentMarker)
+
+	if err := touchNightlySentMarker(dir); err != nil {
+		t.Fatalf("first touch: %v", err)
+	}
+	info, err := os.Stat(marker)
+	if err != nil {
+		t.Fatalf("marker not created: %v", err)
+	}
+	firstMtime := info.ModTime()
+
+	// Back-date the marker (as if it were written last night), then touch again:
+	// the mtime must move forward to "now", not stay pinned at the old value.
+	old := firstMtime.Add(-24 * time.Hour)
+	if err := os.Chtimes(marker, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := touchNightlySentMarker(dir); err != nil {
+		t.Fatalf("second touch: %v", err)
+	}
+	info, err = os.Stat(marker)
+	if err != nil {
+		t.Fatalf("marker missing after second touch: %v", err)
+	}
+	if !info.ModTime().After(old) {
+		t.Errorf("second touch did not refresh mtime: got %v, want after %v", info.ModTime(), old)
+	}
+}
