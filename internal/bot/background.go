@@ -40,9 +40,9 @@ func (b *Bot) startBackground(ctx context.Context) {
 		b.goBG(func() { b.gmgnLoop(ctx, b.Cfg.GMTime, true) })  // morning
 		b.goBG(func() { b.gmgnLoop(ctx, b.Cfg.GNTime, false) }) // night
 	}
-	// Nightly DB backup to one admin's DM — off unless BACKUP_ADMIN_ID is set.
-	if b.Cfg.BackupAdminID != 0 {
-		b.goBG(func() { b.backupLoop(ctx, b.Cfg.BackupTime, b.Cfg.BackupAdminID) })
+	// Nightly DB backup to a single chat — off unless BACKUP_CHAT_ID is set.
+	if b.Cfg.BackupChatID != 0 {
+		b.goBG(func() { b.backupLoop(ctx, b.Cfg.BackupTime, b.Cfg.BackupChatID) })
 	}
 }
 
@@ -199,11 +199,12 @@ func latestBackupFile(dir string, minAge time.Duration) (string, error) {
 	return newest, nil
 }
 
-// backupLoop delivers the newest DB backup to the configured admin's DM once a
-// day at hm (Asia/Tehran), mirroring gmgnLoop's daily-scheduler shape. It is
-// launched only when a valid BackupAdminID is configured (see startBackground),
-// so it can never run — or reach any chat other than that one id — by default.
-func (b *Bot) backupLoop(ctx context.Context, hm [2]int, adminID int64) {
+// backupLoop delivers the newest DB backup to the configured chat (a personal
+// DM or a private channel the bot administers) once a day at hm (Asia/Tehran),
+// mirroring gmgnLoop's daily-scheduler shape. It is launched only when a valid
+// BackupChatID is configured (see startBackground), so it can never run — or
+// reach any chat other than that one id — by default.
+func (b *Bot) backupLoop(ctx context.Context, hm [2]int, chatID int64) {
 	loc, err := time.LoadLocation("Asia/Tehran")
 	if err != nil {
 		slog.Error("backup: cannot load Asia/Tehran", "err", err)
@@ -221,7 +222,7 @@ func (b *Bot) backupLoop(ctx context.Context, hm [2]int, adminID int64) {
 			timer.Stop()
 			return
 		case <-timer.C:
-			b.sendLatestBackupTo(adminID)
+			b.sendLatestBackupTo(chatID)
 		}
 	}
 }
@@ -249,8 +250,9 @@ func touchNightlySentMarker(dir string) error {
 }
 
 // sendLatestBackupTo sends the newest settled backups/ file to a SINGLE chat id
-// (the nightly admin DM). Best-effort — every failure is logged, never fatal —
-// and it targets exactly one chat: it never iterates users / never broadcasts.
+// (the nightly backup destination — a DM or a channel). Best-effort — every
+// failure is logged, never fatal — and it targets exactly one chat: it never
+// iterates users / never broadcasts.
 // On any failure it also pings that same chat with a short text so a silent
 // stall (e.g. the dump one day exceeds Telegram's 50MB bot limit) is noticed.
 func (b *Bot) sendLatestBackupTo(chatID int64) {

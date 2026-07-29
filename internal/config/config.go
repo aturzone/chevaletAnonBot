@@ -70,11 +70,13 @@ type Config struct {
 	GMGroupTopic string
 
 	// Optional nightly DB-backup delivery: once a day at BackupTime (Asia/Tehran)
-	// the newest backups/ file is sent to the single chat BackupAdminID. The whole
-	// job is OFF when BackupAdminID == 0 (env BACKUP_ADMIN_ID unset), so it never
-	// runs — and never broadcasts — unless explicitly configured.
-	BackupAdminID int64
-	BackupTime    [2]int
+	// the newest backups/ file is sent to the single chat BackupChatID (a
+	// personal DM or, for a private channel, the bot must already be an admin
+	// there). The whole job is OFF when BackupChatID == 0 (env BACKUP_CHAT_ID
+	// unset), so it never runs — and never broadcasts — unless explicitly
+	// configured.
+	BackupChatID int64
+	BackupTime   [2]int
 
 	AIURL       string
 	AISessionID string
@@ -199,27 +201,26 @@ func Load() (*Config, error) {
 	c.GNTime = parseHHMM("GN_TIME", req("GN_TIME"), &errs)
 	c.GMGroupID = req("GM_GROUP_ID")
 
-	// Optional nightly-backup-to-admin job. Both keys are optional: the feature is
-	// off unless BACKUP_ADMIN_ID is a valid ADMINS id. BACKUP_TIME defaults to
-	// 02:17 (Asia/Tehran) — a quiet end-of-night snapshot, deliberately off the
-	// hourly backup cron's ":00" minute (belt-and-suspenders on top of the
-	// send-path's min-age guard).
+	// Optional nightly-backup job. Both keys are optional: the feature is off
+	// unless BACKUP_CHAT_ID is set. BACKUP_TIME defaults to 02:17 (Asia/Tehran)
+	// — a quiet end-of-night snapshot, deliberately off the hourly backup cron's
+	// ":00" minute (belt-and-suspenders on top of the send-path's min-age guard).
 	c.BackupTime = [2]int{2, 17}
 	if v := opt("BACKUP_TIME", ""); v != "" {
 		c.BackupTime = parseHHMM("BACKUP_TIME", v, &errs)
 	}
-	if v := opt("BACKUP_ADMIN_ID", ""); v != "" {
+	if v := opt("BACKUP_CHAT_ID", ""); v != "" {
+		// A personal chat id (positive) or a group/channel/supergroup id
+		// (negative, typically -100xxxxxxxxxx) — for the latter the bot must
+		// already be an admin of that chat, or the nightly send just fails.
+		// Only the integer syntax is validated at startup (fail loud on a typo);
+		// unlike ERROR_CHAT_ID/REPORT_CHAT_ID/GM_GROUP_ID this one is validated
+		// eagerly because a bad value silently arms a full-DB nightly send.
 		n, perr := strconv.ParseInt(v, 10, 64)
-		switch {
-		case perr != nil:
-			errs = append(errs, fmt.Sprintf("BACKUP_ADMIN_ID must be an integer (got %q)", v))
-		case !adminIDAllowed(c.Admins, v):
-			// Must be a trusted ADMINS member: a typo must NOT silently ship the
-			// full DB to a random user (or a negative group/channel id) every
-			// night. Fail loud at startup instead of exfiltrating quietly.
-			errs = append(errs, fmt.Sprintf("BACKUP_ADMIN_ID %q must be one of ADMINS %v", v, c.Admins))
-		default:
-			c.BackupAdminID = n
+		if perr != nil {
+			errs = append(errs, fmt.Sprintf("BACKUP_CHAT_ID must be an integer (got %q)", v))
+		} else {
+			c.BackupChatID = n
 		}
 	}
 
@@ -242,17 +243,6 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: %s", strings.Join(errs, "; "))
 	}
 	return c, nil
-}
-
-// adminIDAllowed reports whether id (a Telegram user-id string) is present in the
-// ADMINS list, tolerant of surrounding whitespace in the '|'-split entries.
-func adminIDAllowed(admins []string, id string) bool {
-	for _, a := range admins {
-		if strings.TrimSpace(a) == id {
-			return true
-		}
-	}
-	return false
 }
 
 // parseHHMM parses "HH:MM" into [hour, minute], mirroring config.py's

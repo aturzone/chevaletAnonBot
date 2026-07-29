@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Nightly DB-backup backstop for the Go bot.
 #
-# The bot itself DMs the newest backup to BACKUP_ADMIN_ID once a night at
-# BACKUP_TIME (see internal/bot/background.go: backupLoop/sendLatestBackupTo).
-# This script is a safety net that runs a few minutes later and re-sends the
-# same file ONLY if that in-process job didn't already succeed tonight —
-# otherwise the admin gets the backup twice.
+# The bot itself sends the newest backup to BACKUP_CHAT_ID (a DM or a private
+# channel) once a night at BACKUP_TIME (see internal/bot/background.go:
+# backupLoop/sendLatestBackupTo). This script is a safety net that runs a few
+# minutes later and re-sends the same file ONLY if that in-process job didn't
+# already succeed tonight — otherwise the destination gets the backup twice.
 #
 # Dedup: sendLatestBackupTo (re)touches backups/.nightly-backup-sent on every
 # successful send. This script skips if that marker is fresh (< 6h old).
@@ -34,7 +34,7 @@ mkdir -p "$(dirname "$LOG")"
 ts(){ date -u +%FT%TZ; }
 
 BOT_TOKEN=$(grep -E '^BOT_TOKEN=' "$ENVP" | cut -d= -f2- | tr -d '\r')
-ADMIN=$(grep -E '^BACKUP_ADMIN_ID=' "$ENVP" | cut -d= -f2- | tr -d '\r')
+CHAT_ID=$(grep -E '^BACKUP_CHAT_ID=' "$ENVP" | cut -d= -f2- | tr -d '\r')
 FORCE="${1:-}"
 
 if [ "$FORCE" != "force" ] && [ -f "$MARKER" ]; then
@@ -49,7 +49,7 @@ fi
 NEWEST=$(ls -1t "$BDIR"/backup_*.sql.gz 2>/dev/null | head -1)
 [ -z "$NEWEST" ] && { echo "$(ts) ERROR no backup file" >> "$LOG"; echo NO_FILE; exit 1; }
 
-RESP=$(curl -sS --max-time 150 -F chat_id="$ADMIN" -F document=@"$NEWEST" -F caption="DB backup (backstop): $(basename "$NEWEST")" "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument")
+RESP=$(curl -sS --max-time 150 -F chat_id="$CHAT_ID" -F document=@"$NEWEST" -F caption="DB backup (backstop): $(basename "$NEWEST")" "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument")
 if echo "$RESP" | grep -q '"ok":true'; then
   echo "$(ts) sent $(basename "$NEWEST")" >> "$LOG"; echo SENT_OK
 else
