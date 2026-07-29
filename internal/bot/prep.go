@@ -91,7 +91,8 @@ func (b *Bot) prep(fn Handler) handlers.Response {
 // handler. In order, it:
 //   - lets conversation state changes through untouched;
 //   - swallows the benign Telegram errors PTB ignored (an old callback query, a
-//     vanished reply target, or a Forbidden from a user who blocked the bot);
+//     vanished reply target, a Forbidden from a user who blocked the bot, or a
+//     "message is not modified" from re-triggering a menu already showing);
 //   - on a database error, replies the "database problem" notice to the user and
 //     reports it to ERROR_CHAT_ID (decorators.py `except psycopg2.Error`);
 //   - on a Telegram transport/network error, replies the "internet problem"
@@ -114,6 +115,8 @@ func (b *Bot) handleErr(tg *gotgbot.Bot, ctx *ext.Context, err error) error {
 	case errQueryTooOld(err):
 		return nil
 	case errReplyNotFound(err):
+		return nil
+	case errMessageNotModified(err): // user re-triggered a menu/state they were already on
 		return nil
 	case errForbidden(err): // covers "bot was blocked by the user" / "not a member"
 		return nil

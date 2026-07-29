@@ -17,6 +17,7 @@ func TestErrorPredicates(t *testing.T) {
 	forbidden := &gotgbot.TelegramError{Code: 403, Description: "Forbidden: bot was blocked by the user"}
 	queryOld := &gotgbot.TelegramError{Code: 400, Description: "Bad Request: query is too old and response timeout expired"}
 	replyGone := &gotgbot.TelegramError{Code: 400, Description: "Bad Request: message to be replied not found"}
+	notModified := &gotgbot.TelegramError{Code: 400, Description: "Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message"}
 	pgErr := &pgconn.PgError{Code: "57014"}
 	netErr := &url.Error{Op: "Post", URL: "https://api.telegram.org", Err: errors.New("dial tcp: timeout")}
 	plain := errors.New("boom")
@@ -36,7 +37,10 @@ func TestErrorPredicates(t *testing.T) {
 	if !errReplyNotFound(replyGone) {
 		t.Error("errReplyNotFound should match")
 	}
-	if errQueryTooOld(netErr) || errReplyNotFound(plain) {
+	if !errMessageNotModified(notModified) {
+		t.Error("errMessageNotModified should match")
+	}
+	if errQueryTooOld(netErr) || errReplyNotFound(plain) || errMessageNotModified(plain) {
 		t.Error("desc predicates should be false for non-Telegram errors")
 	}
 
