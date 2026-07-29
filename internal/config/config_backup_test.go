@@ -2,29 +2,45 @@ package config
 
 import "testing"
 
-// TestAdminIDAllowed locks the BACKUP_ADMIN_ID guard: only a genuine ADMINS
-// member is accepted, so a typo (or a group/channel id) can't arm a nightly
-// full-DB send to the wrong chat.
-func TestAdminIDAllowed(t *testing.T) {
-	admins := []string{"1000000001", " 1000000002 ", "1000000003"} // note the padded entry
-	cases := []struct {
-		id   string
-		want bool
-	}{
-		{"1000000002", true}, // matches the whitespace-padded ADMINS entry
-		{"1000000001", true},
-		{"1000000003", true},
-		{"1000000009", false},     // single-digit typo -> rejected
-		{"-1001000000001", false}, // a group/channel id -> rejected
-		{"0", false},
-		{"", false},
+// TestBackupChatID locks BACKUP_CHAT_ID's parsing: optional (off, 0, by
+// default), accepts any valid int64 — including a negative channel/supergroup
+// id, unlike the old ADMINS-only BACKUP_ADMIN_ID this replaced — and rejects
+// non-integer syntax at startup (a typo must not silently arm a nightly
+// full-DB send to garbage).
+func TestBackupChatID(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("BACKUP_CHAT_ID", "")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v; want nil", err)
 	}
-	for _, c := range cases {
-		if got := adminIDAllowed(admins, c.id); got != c.want {
-			t.Errorf("adminIDAllowed(%q) = %v; want %v", c.id, got, c.want)
-		}
+	if c.BackupChatID != 0 {
+		t.Errorf("BackupChatID with BACKUP_CHAT_ID unset = %d; want 0 (feature off)", c.BackupChatID)
 	}
-	if adminIDAllowed(nil, "1000000002") {
-		t.Error("adminIDAllowed(nil, ...) = true; want false (no admins configured)")
+
+	setRequiredEnv(t)
+	t.Setenv("BACKUP_CHAT_ID", "1000000002") // a personal chat/admin DM
+	c, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v; want nil", err)
+	}
+	if c.BackupChatID != 1000000002 {
+		t.Errorf("BackupChatID = %d; want 1000000002", c.BackupChatID)
+	}
+
+	setRequiredEnv(t)
+	t.Setenv("BACKUP_CHAT_ID", "-1001000000001") // a private channel/supergroup id
+	c, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v; want nil", err)
+	}
+	if c.BackupChatID != -1001000000001 {
+		t.Errorf("BackupChatID = %d; want -1001000000001 (channel ids must be accepted)", c.BackupChatID)
+	}
+
+	setRequiredEnv(t)
+	t.Setenv("BACKUP_CHAT_ID", "not-an-int")
+	if _, err := Load(); err == nil {
+		t.Error("Load() with BACKUP_CHAT_ID=not-an-int: want an error, got nil")
 	}
 }

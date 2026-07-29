@@ -59,13 +59,14 @@ on the server) runs two host-side cron jobs alongside the bot container:
 
 ```
 0 * * * *  /opt/chevalet-go-staging/deploy/go/backup.sh                      # hourly DB dump
-40 20 * * * /opt/chevalet-go-staging/deploy/go/nightly-backup-backstop.sh    # re-send if the bot's own nightly DM failed
+40 20 * * * /opt/chevalet-go-staging/deploy/go/nightly-backup-backstop.sh    # re-send if the bot's own nightly send failed
 ```
 
 `backup.sh` dumps `telegram-bot-db` hourly into the host `backups/` dir, which
 is bind-mounted into the container at `/app/backups`. Once a night at
-`BACKUP_TIME` (`internal/bot/background.go`'s `backupLoop`) the bot itself DMs
-the newest file to `BACKUP_ADMIN_ID` and touches `backups/.nightly-backup-sent`.
+`BACKUP_TIME` (`internal/bot/background.go`'s `backupLoop`) the bot itself
+sends the newest file to `BACKUP_CHAT_ID` — a personal DM or a private channel
+the bot administers — and touches `backups/.nightly-backup-sent`.
 `nightly-backup-backstop.sh` runs a few minutes after `BACKUP_TIME` and
 re-sends the same file only if that marker is missing or stale — see the
 script's header comment for why it checks a marker file rather than `docker
