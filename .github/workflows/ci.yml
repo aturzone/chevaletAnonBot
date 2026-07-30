@@ -37,3 +37,23 @@ jobs:
       # encoder golden vectors and the rest run here without a database.
       - name: go test (race)
         run: go test -race -count=1 ./...
+
+  deploy:
+    name: deploy to production
+    needs: build-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      # The server's authorized_keys entry for this key is forced-command
+      # restricted, so it can only ever run one exact deploy command
+      # regardless of what's requested here — this script is documentation,
+      # the server enforces the actual command. This is the LIVE bot serving
+      # real users, so this only runs on main, never on other branches/PRs.
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: cd /opt/chevalet-go-staging && git pull --ff-only && cd deploy/go && docker compose -p go -f docker-compose.cutover.yml up -d --build
