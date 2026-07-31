@@ -159,10 +159,25 @@ func (b *Bot) sendGMGN(isMorning bool) {
 	}
 }
 
-// latestBackupFile returns the name of the most-recently-MODIFIED file in dir
-// (newest by mtime — robust to mixed file-name prefixes, unlike a plain name
-// sort), or "" when dir holds no eligible file. Shared by /admin backup and the
-// nightly delivery so both always pick the truly newest dump.
+// backupFileSuffix is the extension every real DB dump ends in (both the hourly
+// backup.sh output and manual pre-deploy dumps). latestBackupFile requires it so
+// that non-dump files sharing the backups/ dir — above all the 0-byte
+// .nightly-backup-sent marker, which is re-touched to "now" after every send and
+// would otherwise become the newest file and get shipped as an empty archive
+// ("Bad Request: file must be non-empty") — can never be selected.
+const backupFileSuffix = ".sql.gz"
+
+// latestBackupFile returns the name of the most-recently-MODIFIED *.sql.gz dump
+// in dir (newest by mtime — robust to mixed file-name prefixes, unlike a plain
+// name sort), or "" when dir holds no eligible file. Shared by /admin backup and
+// the nightly delivery so both always pick the truly newest dump.
+//
+// The backupFileSuffix filter is load-bearing: the backups/ dir also holds the
+// .nightly-backup-sent marker (see nightlySentMarker). Without the filter, once
+// the hourly dumps stall the marker becomes the newest file and the nightly job
+// tries to send that empty 0-byte file, which Telegram rejects — the exact
+// failure this filter prevents. Any future non-dump bookkeeping file dropped in
+// here is likewise ignored, not shipped.
 //
 // minAge skips any file younger than it: the hourly backup.sh gzips straight
 // into the final filename (no temp+rename), so a file written seconds ago may be
@@ -180,6 +195,9 @@ func latestBackupFile(dir string, minAge time.Duration) (string, error) {
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
+		}
+		if !strings.HasSuffix(e.Name(), backupFileSuffix) {
+			continue // not a DB dump (e.g. the .nightly-backup-sent marker)
 		}
 		info, err := e.Info()
 		if err != nil {

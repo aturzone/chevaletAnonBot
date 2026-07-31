@@ -58,6 +58,19 @@ func TestLatestBackupFile(t *testing.T) {
 		t.Errorf("latestBackupFile(3m) = %q; want the newest SETTLED file, skipping the just-written one", got)
 	}
 
+	// Regression: the .nightly-backup-sent marker lives in backups/ and is
+	// re-touched to "now" after each send. It is NOT a *.sql.gz dump, so even as
+	// the newest file by mtime it must never be selected — otherwise the nightly
+	// job ships a 0-byte file and Telegram rejects it ("file must be non-empty").
+	mk(nightlySentMarker, 10*time.Second) // newest by mtime, but not a dump
+	got, err = latestBackupFile(dir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "backup_mydatabase_20260708_150001.sql.gz" {
+		t.Errorf("latestBackupFile(0) = %q; want the newest *.sql.gz dump, never the .nightly-backup-sent marker", got)
+	}
+
 	// missing dir -> error surfaces
 	if _, err := latestBackupFile(filepath.Join(dir, "does-not-exist"), 0); err == nil {
 		t.Error("missing dir: want an error, got nil")
