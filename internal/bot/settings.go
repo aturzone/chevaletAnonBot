@@ -18,6 +18,10 @@ import (
 // settingsCmd ports settings_cmd_clbk: shows the main settings menu, either by
 // editing the current message (callback) or replying (the /settings command).
 func settingsCmd(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, _ string) error {
+	// Entering settings ends any other pending flow, so text typed here (a new
+	// display name, a tag) cannot be claimed by the start conversation's send state
+	// and delivered to somebody as a message.
+	b.dropConversations(ctx)
 	txt, err := b.Texts.Get("settings/main")
 	if err != nil {
 		return err

@@ -18,6 +18,8 @@ const (
 	msgBtnBlock     = "🔒 بلاک"
 	msgBtnUnblock   = "🔓 آنبلاک"
 	msgBtnReport    = "⚠️ ریپورت"
+	msgBtnOther     = "⚙️ سایر"
+	msgBtnOtherBack = "↩️ بستن"
 )
 
 // cb builds a callback-data button.
@@ -65,15 +67,25 @@ func messageKeyboard(tokenMid, tokenBlock string, mid int64, seen bool) [][]gotg
 			cb(msgBtnSeen, "seen|"+tokenMid+"|"+midStr),
 		}, firstRow...)
 	}
-	return [][]gotgbot.InlineKeyboardButton{
-		firstRow,
-		{
-			// The Python original put a blank " " button between these two as a
-			// spacer. Removed by request: it did nothing, and Telegram spreads the
-			// two real buttons across the row anyway.
-			cb(msgBtnReport, "report|"+tokenMid+"|"+midStr),
-			cb(msgBtnBlock, "block|"+tokenBlock),
-		},
+	// Report and block moved behind "سایر" so a delivered message carries two rows,
+	// not four: the actions people use constantly stay visible, the rarer ones are
+	// one tap away. otherActions expands it in place.
+	firstRow = append(firstRow, cb(msgBtnOther, "oth|"+tokenBlock))
+
+	return [][]gotgbot.InlineKeyboardButton{firstRow}
+}
+
+// otherActionsRow is the row "سایر" reveals.
+func otherActionsRow(tokenMid, tokenBlock, midStr string, blocked bool) []gotgbot.InlineKeyboardButton {
+	blockBtn := cb(msgBtnBlock, "block|"+tokenBlock)
+	if blocked {
+		// Read from the database rather than remembered in the button, so collapsing
+		// and reopening cannot show "block" to someone who has already blocked.
+		blockBtn = cb(msgBtnUnblock, "unblock|"+tokenBlock)
+	}
+	return []gotgbot.InlineKeyboardButton{
+		cb(msgBtnReport, "report|"+tokenMid+"|"+midStr),
+		blockBtn,
 	}
 }
 

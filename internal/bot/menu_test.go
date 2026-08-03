@@ -32,7 +32,7 @@ func menuCallbackData() []string {
 }
 
 func userMenuVerbs() []string {
-	return []string{menuMain, menuHelp, menuHelpText, menuPrivacy, menuMyUID, menuBug, menuDonate}
+	return []string{menuMain, menuHelp, menuHelpText, menuPrivacy, menuMyUID, menuBug, menuBugSend, menuDonate}
 }
 
 func adminMenuVerbs() []string {
@@ -60,6 +60,7 @@ var otherPrefixFilters = []string{
 	"wpp|", "warning|", "easier-answer|", "channel-signature|", "seen-settings|",
 	"anon-name|", "unblock-all|", "unblock-me|", "ch-link", "rm-link",
 	"answer|", "seen|", "report|", "block|", "unblock|", "cancel",
+	"oth|", "othx|",
 }
 
 // TestMenuDataDoesNotCollide is the guarantee that the panel's buttons actually
@@ -161,8 +162,8 @@ func TestMenuEveryScreenIsReachable(t *testing.T) {
 			}
 		}
 	}
-	// Children of the help screen.
-	for _, v := range []string{menuHelpText, menuPrivacy, menuMyUID, menuBug} {
+	// Children of the help screen, and the bug page's own child.
+	for _, v := range []string{menuHelpText, menuPrivacy, menuMyUID, menuBug, menuBugSend} {
 		reachable[v] = true
 	}
 	// Child of the donate-settings screen.
@@ -323,5 +324,18 @@ func TestStartGuideMentionsTheBar(t *testing.T) {
 	// bar is now hideable.
 	if !strings.Contains(txt, "کیبورد") {
 		t.Error("the guide does not explain how to reopen the bar after hiding it")
+	}
+}
+
+// TestHelpSubPagesReturnToHelp covers the reported navigation bug: back from a help
+// sub-page jumped to the MAIN menu instead of the help menu it came from.
+func TestHelpSubPagesReturnToHelp(t *testing.T) {
+	r := backRowTo(menuHelp, "↩️ برگشت به راهنما")
+	if len(r) != 1 || r[0].CallbackData != "menu|"+menuHelp {
+		t.Fatalf("backRowTo(help) = %+v; want a single button targeting menu|%s", r, menuHelp)
+	}
+	// The generic back row must still exist for screens that DO belong at the top.
+	if backRow()[0].CallbackData != "menu|"+menuMain {
+		t.Errorf("backRow no longer targets the main menu: %q", backRow()[0].CallbackData)
 	}
 }

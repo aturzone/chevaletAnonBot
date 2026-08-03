@@ -1,6 +1,11 @@
 package bot
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/PaulSonOfLars/gotgbot/v2"
+)
 
 // TestMessageKeyboard locks the callback_data format of the buttons under every
 // delivered anonymous message. These strings are a frozen compatibility contract
@@ -12,48 +17,100 @@ func TestMessageKeyboard(t *testing.T) {
 	const tokenBlock = "TOKBLK"
 	const mid int64 = 12345
 
-	// without "seen": row0 = [answer], row1 = [report, block].
-	// The blank spacer button that used to sit between report and block was
-	// removed by request, so row1 is 2 buttons — see messageKeyboard.
+	// ONE row now: [answer] [سایر]. Report and block moved behind the toggle, and
+	// the blank spacer and donation row are gone. The caller appends the "sent with
+	// link N" row, so a delivered message shows two rows in total.
 	kb := messageKeyboard(tokenMid, tokenBlock, mid, false)
-	if len(kb) != 2 {
-		t.Fatalf("rows = %d; want 2", len(kb))
+	if len(kb) != 1 {
+		t.Fatalf("rows = %d; want 1 (the caller adds the link row)", len(kb))
 	}
-	if len(kb[0]) != 1 {
-		t.Fatalf("row0 buttons = %d; want 1 (answer only)", len(kb[0]))
+	if len(kb[0]) != 2 {
+		t.Fatalf("row0 buttons = %d; want 2 (answer, سایر)", len(kb[0]))
 	}
 	if kb[0][0].CallbackData != "answer|TOKMID|12345" {
 		t.Errorf("answer data = %q; want answer|TOKMID|12345", kb[0][0].CallbackData)
 	}
-	if len(kb[1]) != 2 {
-		t.Fatalf("row1 buttons = %d; want 2 (report, block)", len(kb[1]))
+	// The toggle carries tokenBlock, which is what makes expanding stateless: the
+	// answer button supplies tokenMid+mid, this one supplies the block token.
+	if kb[0][1].CallbackData != "oth|TOKBLK" {
+		t.Errorf("سایر data = %q; want oth|TOKBLK", kb[0][1].CallbackData)
 	}
-	if kb[1][0].CallbackData != "report|TOKMID|12345" {
-		t.Errorf("report data = %q; want report|TOKMID|12345", kb[1][0].CallbackData)
-	}
-	// No button in the row may be the old blank spacer.
-	for i, btn := range kb[1] {
+	// The removed spacer must not come back.
+	for i, btn := range kb[0] {
 		if btn.CallbackData == "no-callback" {
-			t.Errorf("row1[%d] is still the removed spacer button", i)
+			t.Errorf("row0[%d] is the removed blank spacer", i)
 		}
 	}
-	// block carries the SEPARATE block token and NO mid — blocking a sender, not a
-	// message. It must never carry the mid-bound token (that token is the S-0001
-	// binding for the id-acting verbs).
-	if kb[1][1].CallbackData != "block|TOKBLK" {
-		t.Errorf("block data = %q; want block|TOKBLK (separate token, no mid)", kb[1][1].CallbackData)
+	// Report and block must NOT be on the visible keyboard any more.
+	for _, r := range kb {
+		for _, btn := range r {
+			if strings.HasPrefix(btn.CallbackData, "report|") || strings.HasPrefix(btn.CallbackData, "block|") {
+				t.Errorf("%q is still visible; it belongs behind سایر", btn.CallbackData)
+			}
+		}
 	}
 
-	// with "seen": the seen button is inserted at the FRONT of row0.
+	// with "seen": the seen button is inserted at the FRONT of row0, ahead of both.
 	kbs := messageKeyboard(tokenMid, tokenBlock, mid, true)
-	if len(kbs[0]) != 2 {
-		t.Fatalf("row0 buttons (seen on) = %d; want 2", len(kbs[0]))
+	if len(kbs[0]) != 3 {
+		t.Fatalf("row0 buttons (seen on) = %d; want 3", len(kbs[0]))
 	}
 	if kbs[0][0].CallbackData != "seen|TOKMID|12345" {
 		t.Errorf("seen data = %q; want seen|TOKMID|12345 (must be first)", kbs[0][0].CallbackData)
 	}
-	if kbs[0][1].CallbackData != "answer|TOKMID|12345" {
-		t.Errorf("answer data (seen on) = %q; want answer|TOKMID|12345 (after seen)", kbs[0][1].CallbackData)
+	if kbs[0][2].CallbackData != "oth|TOKBLK" {
+		t.Errorf("سایر must stay last; got %q", kbs[0][2].CallbackData)
+	}
+}
+
+// TestOtherActionsRow covers what سایر reveals, including that the block button
+// reflects the CURRENT block state rather than a value remembered in the data.
+func TestOtherActionsRow(t *testing.T) {
+	r := otherActionsRow("TOKMID", "TOKBLK", "12345", false)
+	if len(r) != 2 {
+		t.Fatalf("revealed buttons = %d; want 2", len(r))
+	}
+	if r[0].CallbackData != "report|TOKMID|12345" {
+		t.Errorf("report data = %q", r[0].CallbackData)
+	}
+	if r[1].CallbackData != "block|TOKBLK" {
+		t.Errorf("block data = %q; want block|TOKBLK", r[1].CallbackData)
+	}
+	// Already blocked -> the unblock action, so collapsing and reopening cannot
+	// offer "block" to someone who has already blocked.
+	rb := otherActionsRow("TOKMID", "TOKBLK", "12345", true)
+	if rb[1].CallbackData != "unblock|TOKBLK" {
+		t.Errorf("blocked state gave %q; want unblock|TOKBLK", rb[1].CallbackData)
+	}
+	if !isOtherActionsRow(r) || !isOtherActionsRow(rb) {
+		t.Error("isOtherActionsRow does not recognise the row it must remove on collapse")
+	}
+	if isOtherActionsRow(messageKeyboard("A", "B", 1, true)[0]) {
+		t.Error("isOtherActionsRow matched the main row; collapsing would delete the answer button")
+	}
+}
+
+// TestAnswerTokenFromKeyboard is the reason the answer button is never hidden: it
+// is where tokenMid and the message id are read back from on expand.
+func TestAnswerTokenFromKeyboard(t *testing.T) {
+	kb := messageKeyboard("TOKMID", "TOKBLK", 999, true)
+	tok, midStr, ok := answerTokenFromKeyboard(kb)
+	if !ok || tok != "TOKMID" || midStr != "999" {
+		t.Errorf("got (%q,%q,%v); want (TOKMID,999,true)", tok, midStr, ok)
+	}
+
+	// A keyboard with no answer button must report failure rather than guess — that
+	// path shows the user "this message is too old" instead of half a menu.
+	if _, _, ok := answerTokenFromKeyboard([][]gotgbot.InlineKeyboardButton{
+		{cb("x", "no-callback")},
+	}); ok {
+		t.Error("answerTokenFromKeyboard invented a token from a keyboard without one")
+	}
+	// Malformed data must not parse either.
+	if _, _, ok := answerTokenFromKeyboard([][]gotgbot.InlineKeyboardButton{
+		{cb("x", "answer|TOK|notanumber")},
+	}); ok {
+		t.Error("a non-numeric message id was accepted")
 	}
 }
 
