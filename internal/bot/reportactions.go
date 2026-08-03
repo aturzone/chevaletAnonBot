@@ -342,12 +342,15 @@ func (b *Bot) rptStamp(tg *gotgbot.Bot, ctx *ext.Context, reportID, label string
 	if err != nil || c.ChannelChatID == 0 || c.ChannelMsgID == 0 {
 		return
 	}
-	// Replace the channel's link button with the outcome. Editing (not deleting)
-	// keeps the report itself readable as a record.
+	// Relabel the channel's button with the outcome, keeping it a LINK: a callback
+	// button here would be inert (channel taps never arrive) yet still look
+	// tappable, and an admin may well want to reopen the case afterwards to message
+	// either party. So the label carries the status and the button still works.
 	if _, _, err := tg.EditMessageReplyMarkup(&gotgbot.EditMessageReplyMarkupOpts{
-		ChatId:      c.ChannelChatID,
-		MessageId:   c.ChannelMsgID,
-		ReplyMarkup: ikb(row(cb(label, "rpt|done|-"))),
+		ChatId:    c.ChannelChatID,
+		MessageId: c.ChannelMsgID,
+		ReplyMarkup: ikb(row(urlBtn(label,
+			"https://t.me/"+b.TG.User.Username+"?start="+reportDeepLinkPrefix+c.ReportID))),
 	}); err != nil {
 		slog.Warn("could not stamp the report channel message",
 			"chat", c.ChannelChatID, "msg", c.ChannelMsgID, "err", err)
