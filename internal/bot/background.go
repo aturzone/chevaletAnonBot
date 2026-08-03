@@ -46,25 +46,29 @@ func (b *Bot) startBackground(ctx context.Context) {
 	}
 }
 
+// botCommands is the list Telegram shows in its blue "Menu" button. Empty by
+// design — see setCommands. Split out so a test can assert it stays empty, since
+// re-adding an entry silently brings the blue button back next to the 🏠 منو bar.
+func botCommands() []gotgbot.BotCommand { return []gotgbot.BotCommand{} }
+
 // setCommands ports jobs.set_commands: registers the bot's command menu. (The
 // list matches the job's, which includes /donate — it superseded the shorter
 // list main.py set at startup.)
 func (b *Bot) setCommands() {
-	// /menu is now the single entry point (it holds links, settings, help and
-	// support), so the list is deliberately short — a five-item command list is
-	// noise once one panel covers all of it.
+	// EMPTY ON PURPOSE. Telegram shows its blue "Menu" button next to the input box
+	// only while a bot has registered commands; clearing the list removes it, which
+	// is the point — the 🏠 منو bar button now covers navigation, and two competing
+	// menu affordances side by side is what made the UI feel cluttered.
 	//
-	// Every old command STILL WORKS: /help, /settings, /my_links, /donate,
-	// /privacy, /myuid, /bug and the admin ones are all registered as before. They
-	// are only dropped from this list, not removed, so the ~17k existing users who
-	// type them out of habit are unaffected.
+	// Every command STILL WORKS: /start, /menu, /cancel, /help, /settings,
+	// /my_links, /donate, /privacy, /myuid, /bug and the admin ones are all
+	// registered exactly as before, and Telegram still renders them as tappable
+	// links where the texts mention them. Only the list — and with it the blue
+	// button — is gone.
 	//
-	// /cancel stays visible on purpose: a user part-way through sending needs it
-	// reachable without opening a panel first.
-	_, err := b.TG.SetMyCommands([]gotgbot.BotCommand{
-		{Command: "menu", Description: "🏠 منو"},
-		{Command: "cancel", Description: "❌ کنسل کردن هرکاری که داری انجام میدی"},
-	}, nil)
+	// To bring the blue button back, put entries in botCommands(); nothing else
+	// changes.
+	_, err := b.TG.SetMyCommands(botCommands(), nil)
 	if err != nil {
 		slog.Warn("set_commands failed", "err", err)
 		return

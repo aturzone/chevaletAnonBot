@@ -1,6 +1,8 @@
 package bot
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -258,8 +260,11 @@ func TestMenuBarKeyboard(t *testing.T) {
 		t.Errorf("bar button = %q; want %q (must equal what the filter matches)",
 			kb.Keyboard[0][0].Text, menuBarButton)
 	}
-	if !kb.IsPersistent {
-		t.Error("the bar is not persistent, so it collapses behind the keyboard icon")
+	// MUST be false: true pins the bar open with no way to put it away, which is
+	// wrong for a bot people mostly use to type. False lets the keyboard icon next
+	// to the input box collapse and reopen it.
+	if kb.IsPersistent {
+		t.Error("the bar is persistent, so the user cannot hide it")
 	}
 	if !kb.ResizeKeyboard {
 		t.Error("the bar is not resized, so it takes a full keyboard's height")
@@ -285,5 +290,38 @@ func TestModerationScreensHaveAnExit(t *testing.T) {
 	if modBackToPanel().CallbackData != "menu|"+menuAdmin {
 		t.Errorf("the moderation exit points at %q; want the admin panel",
 			modBackToPanel().CallbackData)
+	}
+}
+
+// TestNoBlueMenuButton pins the command list empty. Telegram renders its blue
+// "Menu" button only while a bot has registered commands, and two competing menu
+// affordances side by side is what made the UI cluttered — so re-adding an entry
+// here silently undoes that.
+func TestNoBlueMenuButton(t *testing.T) {
+	if got := botCommands(); len(got) != 0 {
+		t.Errorf("botCommands() has %d entries (%v); Telegram would show its blue Menu button again", len(got), got)
+	}
+}
+
+// TestStartGuideMentionsTheBar guards the guide text against pointing at UI that no
+// longer exists. It used to say "use the menu at the bottom left", which was the
+// blue button — removing that button made the instruction actively wrong.
+func TestStartGuideMentionsTheBar(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "Texts", "start_help.txt"))
+	if err != nil {
+		t.Fatalf("reading Texts/start_help.txt: %v", err)
+	}
+	txt := string(raw)
+
+	if strings.Contains(txt, "پایین سمت چپ") {
+		t.Error("the guide still points at the bottom-left menu, which no longer exists")
+	}
+	if !strings.Contains(txt, menuBarButton) {
+		t.Errorf("the guide does not mention the %q button, so a new user is not told how to navigate", menuBarButton)
+	}
+	// And it must say how to get the bar back if it has been collapsed, since the
+	// bar is now hideable.
+	if !strings.Contains(txt, "کیبورد") {
+		t.Error("the guide does not explain how to reopen the bar after hiding it")
 	}
 }
