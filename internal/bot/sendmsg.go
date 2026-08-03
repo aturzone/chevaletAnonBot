@@ -430,6 +430,13 @@ func (b *Bot) warningHandle(ctx *ext.Context, wasChannelReply bool, targetUID, u
 		sentText = txtSentToThem
 	}
 
+	// Count the delivery for the daily stats. Reached only once the message is
+	// actually through, so the figure means "delivered", not "attempted". Best
+	// effort: a counter must never fail a send that already succeeded.
+	if cerr := b.DB.CountMessage(dbctx); cerr != nil {
+		slog.Warn("could not count a delivered message", "err", cerr)
+	}
+
 	showWarning := wasChannelReply
 	if !showWarning {
 		w, err := b.DB.GetWarning(dbctx, userid)

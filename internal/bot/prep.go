@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strconv"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
@@ -81,6 +82,13 @@ func (b *Bot) prep(fn Handler) handlers.Response {
 		}
 		if banned {
 			return nil // banned users are silently ignored, as in the original
+		}
+
+		// Record activity for the daily stats. Best effort on purpose: this is a
+		// reporting nicety, and a hiccup here must never stop a user's message from
+		// being handled. It writes at most once per user per day (see TouchUser).
+		if terr := b.DB.TouchUser(dbctx, userid); terr != nil {
+			slog.Warn("could not record user activity", "err", terr)
 		}
 
 		return b.handleErr(tg, ctx, fn(b, tg, ctx, userid))
