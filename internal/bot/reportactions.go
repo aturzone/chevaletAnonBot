@@ -2,6 +2,7 @@ package bot
 
 import (
 	"html"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -101,17 +102,35 @@ func (b *Bot) reportAction(tg *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 	msg := ctx.EffectiveMessage
+	actor := strconv.FormatInt(clbk.From.Id, 10)
+
+	// Every one of the guards below used to return silently, which made a
+	// non-working button impossible to tell apart from a button whose update never
+	// arrived. Each refusal now says why, and each action is logged: this doubles
+	// as the audit trail for who banned whom, which an admin path deserves anyway.
+	chatID := int64(0)
+	if msg != nil {
+		chatID = msg.Chat.Id
+	}
+	slog.Info("report action received",
+		"chat", chatID, "want_chat", b.Cfg.ReportChatID,
+		"actor", actor, "admin", b.isAdmin(actor), "data", clbk.Data)
 
 	// Only ever act inside the configured report chat.
 	if msg == nil || b.Cfg.ReportChatID == "" ||
 		strconv.FormatInt(msg.Chat.Id, 10) != b.Cfg.ReportChatID {
-		_, _ = clbk.Answer(tg, nil)
+		slog.Warn("report action refused: wrong chat",
+			"chat", chatID, "want_chat", b.Cfg.ReportChatID, "msg_nil", msg == nil)
+		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
+			Text:      "این دکمه فقط داخل کانال ریپورت کار می‌کنه.",
+			ShowAlert: true,
+		})
 		return nil
 	}
 
 	// Authority comes from ADMINS, not from channel membership.
-	actor := strconv.FormatInt(clbk.From.Id, 10)
 	if !b.isAdmin(actor) {
+		slog.Warn("report action refused: not an admin", "actor", actor)
 		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
 			Text:      "فقط ادمین‌ها می‌تونن از این دکمه‌ها استفاده کنن.",
 			ShowAlert: true,
@@ -121,7 +140,11 @@ func (b *Bot) reportAction(tg *gotgbot.Bot, ctx *ext.Context) error {
 
 	fields := strings.SplitN(clbk.Data, "|", 3)
 	if len(fields) != 3 {
-		_, _ = clbk.Answer(tg, nil)
+		slog.Warn("report action refused: malformed data", "data", clbk.Data)
+		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
+			Text:      "دکمه ناشناس.",
+			ShowAlert: true,
+		})
 		return nil
 	}
 	verb, token := fields[1], fields[2]
@@ -137,6 +160,7 @@ func (b *Bot) reportAction(tg *gotgbot.Bot, ctx *ext.Context) error {
 
 	uid, ok := b.Tokens.Open(token, nil)
 	if !ok {
+		slog.Warn("report action refused: token did not open", "verb", verb, "token_len", len(token))
 		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
 			Text:      "این دکمه دیگه معتبر نیست.",
 			ShowAlert: true,
@@ -144,6 +168,7 @@ func (b *Bot) reportAction(tg *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 	uidStr := strconv.FormatInt(uid, 10)
+	slog.Info("report action dispatch", "verb", verb, "actor", actor, "target", uidStr)
 
 	switch verb {
 	case rptVerbAccept:
@@ -155,6 +180,7 @@ func (b *Bot) reportAction(tg *gotgbot.Bot, ctx *ext.Context) error {
 	case rptVerbMsgReported:
 		return b.rptAskCompose(tg, clbk, token, "reported")
 	default:
+		slog.Warn("report action refused: unknown verb", "verb", verb)
 		_, _ = clbk.Answer(tg, nil)
 		return nil
 	}
@@ -170,6 +196,8 @@ func (b *Bot) rptAccept(tg *gotgbot.Bot, ctx *ext.Context, clbk *gotgbot.Callbac
 	if err != nil {
 		return err
 	}
+	slog.Info("report registered by admin", "target", uid, "total", count,
+		"actor", strconv.FormatInt(clbk.From.Id, 10))
 	_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
 		Text:      "ثبت شد. تعداد ریپورت‌های این کاربر: " + strconv.Itoa(count),
 		ShowAlert: true,
@@ -189,6 +217,8 @@ func (b *Bot) rptBan(tg *gotgbot.Bot, ctx *ext.Context, clbk *gotgbot.CallbackQu
 	if err := b.DB.BanAction(dbctx, uid, true); err != nil {
 		return err
 	}
+	slog.Info("user banned by admin from report", "target", uid,
+		"actor", strconv.FormatInt(clbk.From.Id, 10))
 	_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
 		Text:      "کاربر بن شد.",
 		ShowAlert: true,
@@ -208,6 +238,11 @@ func (b *Bot) rptBan(tg *gotgbot.Bot, ctx *ext.Context, clbk *gotgbot.CallbackQu
 func (b *Bot) rptMarkDone(tg *gotgbot.Bot, ctx *ext.Context, label string) {
 	msg := ctx.EffectiveMessage
 	if msg == nil || msg.ReplyMarkup == nil {
+		// The action itself already succeeded; only the visual stamp is lost. Worth
+		// a line, because "the button did not change" is exactly how a user reports
+		// this and it would otherwise look like nothing happened at all.
+		slog.Warn("report action: cannot stamp the keyboard",
+			"msg_nil", msg == nil, "markup_nil", msg == nil || msg.ReplyMarkup == nil)
 		return
 	}
 	rows := msg.ReplyMarkup.InlineKeyboard
@@ -219,11 +254,14 @@ func (b *Bot) rptMarkDone(tg *gotgbot.Bot, ctx *ext.Context, label string) {
 		}
 		newRows = append(newRows, r)
 	}
-	// Errors ignored deliberately: the action already succeeded, and Telegram
-	// rejects an unchanged markup — see tgerr.go's "message is not modified".
-	_, _, _ = msg.EditReplyMarkup(tg, &gotgbot.EditMessageReplyMarkupOpts{
+	// The action already succeeded, so a failure here is not fatal — but it is
+	// logged rather than dropped, because in a channel this is where a missing
+	// "can edit messages" permission would show up.
+	if _, _, err := msg.EditReplyMarkup(tg, &gotgbot.EditMessageReplyMarkupOpts{
 		ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: newRows},
-	})
+	}); err != nil {
+		slog.Warn("report action: editing the keyboard failed", "err", err)
+	}
 }
 
 // rowHasVerb reports whether a keyboard row carries one of the rpt verbs.
