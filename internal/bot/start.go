@@ -24,10 +24,15 @@ func startCmd(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 		if err != nil {
 			return err
 		}
-		txt = strings.ReplaceAll(txt, "%s", b.Cfg.DonationLink)
+		// b.Dyn, so a donation link an admin changed applies here too (this text is
+		// the first thing a new user reads).
+		txt = strings.ReplaceAll(txt, "%s", b.Dyn.DonationLink())
 		if e := b.replyHTML(ctx, txt, true); e != nil {
 			return e
 		}
+		// New users get the menu bar here, so it is present from their first message
+		// rather than only after they find /menu.
+		b.ensureMenuBar(tg, ctx, userid)
 		return handlers.EndConversation()
 	}
 

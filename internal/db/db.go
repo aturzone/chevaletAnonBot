@@ -175,6 +175,13 @@ func (db *DB) MakeTables(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS users_last_active_at_idx ON users (last_active_at)`,
 		`CREATE INDEX IF NOT EXISTS users_created_at_idx ON users (created_at)`,
 
+		// menu_bar_sent records that the persistent "🏠 منو" bar has been installed
+		// in this user's chat. A ReplyKeyboard has to arrive attached to some message
+		// and then persists forever, so this makes it a one-time event: without the
+		// flag, either the ~17k users who joined before the bar existed would never
+		// get it, or every /menu would have to send an extra message to carry it.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS menu_bar_sent BOOLEAN NOT NULL DEFAULT FALSE`,
+
 		// daily_metrics is a pure per-day COUNTER. Deliberately not a message log:
 		// counting deliveries needs no sender, no recipient and no content, so the
 		// bot can report volume without recording who messaged whom.

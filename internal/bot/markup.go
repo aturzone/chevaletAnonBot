@@ -105,6 +105,11 @@ func settingsMainMenu() [][]gotgbot.InlineKeyboardButton {
 		{cb("#️⃣ تگ آهنگ", "audio-tag|"), cb("#️⃣ تگ دلخواه", "custom-tag|")},
 		{cb("🎭 نام مستعار ناشناس", "anon-name|")},
 		{cb("🚫 آنبلاک شدن خودت", "unblock-me|"), cb("🚫 آنبلاک همه", "unblock-all|")},
+		// Settings is a page of /menu now, so it needs a way home. settingsCmd ends
+		// the conversation before this is shown, so leaving via the panel strands no
+		// state. Handled by menuCallback, which is registered ahead of the
+		// conversations.
+		{cb("🏠 برگشت به منو", "menu|"+menuMain)},
 	}
 }
 
@@ -132,6 +137,9 @@ func mylinksDefaultMenu() [][]gotgbot.InlineKeyboardButton {
 		{cb("➕ اضافه کردن لینک جدید", "add-link")},
 		{cb("🔧 شخصی سازی لینک", "ch-link"), cb("❌ حذف کردن لینک", "rm-link")},
 		{cb("❔چرا چندتا لینک داشته باشم", "more-links")},
+		// Same as the settings menu: my_links is a page of /menu, and myLinksCmd has
+		// ended the conversation by the time this shows.
+		{cb("🏠 برگشت به منو", "menu|"+menuMain)},
 	}
 }
 

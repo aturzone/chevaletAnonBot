@@ -205,3 +205,21 @@ func (db *DB) SetAnonEnabled(ctx context.Context, uid string, enabled bool) erro
 	_, err := db.pool.Exec(ctx, `UPDATE users SET anon_enabled=$1 WHERE uid=$2`, enabled, uid)
 	return err
 }
+
+// MenuBarSent reports whether the persistent "🏠 منو" bar has already been
+// installed in this user's chat. See the column's comment in MakeTables: a
+// ReplyKeyboard can only arrive attached to a message, so sending it is a one-time
+// event that has to be remembered.
+func (db *DB) MenuBarSent(ctx context.Context, uid string) (bool, error) {
+	var sent bool
+	err := db.pool.QueryRow(ctx,
+		`SELECT COALESCE(menu_bar_sent, FALSE) FROM users WHERE uid=$1`, uid).Scan(&sent)
+	return sent, err
+}
+
+// SetMenuBarSent marks the bar as installed for this user.
+func (db *DB) SetMenuBarSent(ctx context.Context, uid string) error {
+	_, err := db.pool.Exec(ctx,
+		`UPDATE users SET menu_bar_sent = TRUE WHERE uid=$1`, uid)
+	return err
+}

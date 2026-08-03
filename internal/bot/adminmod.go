@@ -77,7 +77,8 @@ func (b *Bot) modList(banned bool, page int) (string, gotgbot.InlineKeyboardMark
 		if banned {
 			empty = "هیچ کاربر بن شده‌ای نیست 👌"
 		}
-		return title + "\n\n" + empty, ikb(row(b.modSwitchButton(banned))), nil
+		return title + "\n\n" + empty,
+			ikb(row(b.modSwitchButton(banned)), row(modBackToPanel())), nil
 	}
 
 	// Clamp rather than error: a page can go stale when another admin acts.
@@ -119,8 +120,17 @@ func (b *Bot) modList(banned bool, page int) (string, gotgbot.InlineKeyboardMark
 		}
 	}
 	rows = append(rows, row(b.modSwitchButton(banned)))
+	// Always here, not appended by the caller: drilling into a user and coming back
+	// to the list used to lose the route to the admin panel, leaving the list as a
+	// dead end.
+	rows = append(rows, row(modBackToPanel()))
 
 	return sb.String(), gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}, nil
+}
+
+// modBackToPanel is the shared route out of the moderation screens.
+func modBackToPanel() gotgbot.InlineKeyboardButton {
+	return cb("🛡 پنل ادمین", "menu|"+menuAdmin)
 }
 
 // modSwitchButton toggles between the reported and banned lists.
