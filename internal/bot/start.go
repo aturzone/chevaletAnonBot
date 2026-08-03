@@ -27,12 +27,19 @@ func startCmd(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 		// b.Dyn, so a donation link an admin changed applies here too (this text is
 		// the first thing a new user reads).
 		txt = strings.ReplaceAll(txt, "%s", b.Dyn.DonationLink())
-		if e := b.replyHTML(ctx, txt, true); e != nil {
+
+		// The bar rides along ON the welcome message rather than arriving as a
+		// separate notice: /start should produce one message that already has the
+		// button, which is both what was asked for and one less thing to read.
+		if _, e := ctx.EffectiveMessage.Reply(tg, txt, &gotgbot.SendMessageOpts{
+			ParseMode:          "HTML",
+			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
+			ReplyMarkup:        menuBarKeyboard(),
+		}); e != nil {
 			return e
 		}
-		// New users get the menu bar here, so it is present from their first message
-		// rather than only after they find /menu.
-		b.ensureMenuBar(tg, ctx, userid)
+		// Record it so the standalone install notice never fires for this user.
+		b.markMenuBarSent(userid)
 		return handlers.EndConversation()
 	}
 

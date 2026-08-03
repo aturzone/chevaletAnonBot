@@ -68,14 +68,31 @@ const menuTitle = "🏠 <b>منوی اصلی</b>\n\nیکی از گزینه‌ه�
 // panel — so the label is effectively protocol and must match on both sides.
 const menuBarButton = "🏠 منو"
 
-// menuBarKeyboard is the bar. IsPersistent keeps it visible instead of collapsing
-// behind the keyboard icon; ResizeKeyboard keeps it one row tall.
+// menuBarKeyboard is the bar.
+//
+// IsPersistent is deliberately FALSE. True pins the bar open with no way to put it
+// away, which is wrong for a bot people mostly use to type: the keyboard icon next
+// to the input box has to be able to collapse and reopen it. False is what every
+// bot with a usable bottom bar does.
+//
+// ResizeKeyboard keeps it one row tall instead of a full keyboard's height.
 func menuBarKeyboard() gotgbot.ReplyKeyboardMarkup {
 	return gotgbot.ReplyKeyboardMarkup{
 		Keyboard:              [][]gotgbot.KeyboardButton{{{Text: menuBarButton}}},
-		IsPersistent:          true,
+		IsPersistent:          false,
 		ResizeKeyboard:        true,
 		InputFieldPlaceholder: "پیامت رو بنویس…",
+	}
+}
+
+// markMenuBarSent records that the bar has reached this user, for callers that
+// attached it to a message of their own (see /start). Best effort: the only cost of
+// failure is showing the install notice once more.
+func (b *Bot) markMenuBarSent(userid string) {
+	dbctx, cancel := b.bg()
+	defer cancel()
+	if err := b.DB.SetMenuBarSent(dbctx, userid); err != nil {
+		slog.Warn("could not record that the menu bar was installed", "err", err)
 	}
 }
 
