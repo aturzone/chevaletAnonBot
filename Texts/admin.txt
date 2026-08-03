@@ -27,4 +27,10 @@
 <code>/admin ai-session set SESSION_ID</code>: set new AI session ID
 <code>/admin ai-session reset</code>: reset AI session ID to config default
 🔸---------------
+<code>/admin_donate</code>: show the donation button state and link
+<code>/admin_donate active</code>: show the donation button under messages
+<code>/admin_donate deactive</code>: hide it (default)
+<code>/admin_donate link URL</code>: set the donation link
+<code>/admin_donate link reset</code>: reset the link to config default
+🔸---------------
 <code>/admin backup</code>: send the last backup file

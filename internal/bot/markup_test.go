@@ -12,7 +12,9 @@ func TestMessageKeyboard(t *testing.T) {
 	const tokenBlock = "TOKBLK"
 	const mid int64 = 12345
 
-	// without "seen": row0 = [answer], row1 = [report, spacer, block].
+	// without "seen": row0 = [answer], row1 = [report, block].
+	// The blank spacer button that used to sit between report and block was
+	// removed by request, so row1 is 2 buttons — see messageKeyboard.
 	kb := messageKeyboard(tokenMid, tokenBlock, mid, false)
 	if len(kb) != 2 {
 		t.Fatalf("rows = %d; want 2", len(kb))
@@ -23,20 +25,23 @@ func TestMessageKeyboard(t *testing.T) {
 	if kb[0][0].CallbackData != "answer|TOKMID|12345" {
 		t.Errorf("answer data = %q; want answer|TOKMID|12345", kb[0][0].CallbackData)
 	}
-	if len(kb[1]) != 3 {
-		t.Fatalf("row1 buttons = %d; want 3 (report, spacer, block)", len(kb[1]))
+	if len(kb[1]) != 2 {
+		t.Fatalf("row1 buttons = %d; want 2 (report, block)", len(kb[1]))
 	}
 	if kb[1][0].CallbackData != "report|TOKMID|12345" {
 		t.Errorf("report data = %q; want report|TOKMID|12345", kb[1][0].CallbackData)
 	}
-	if kb[1][1].CallbackData != "no-callback" {
-		t.Errorf("spacer data = %q; want no-callback", kb[1][1].CallbackData)
+	// No button in the row may be the old blank spacer.
+	for i, btn := range kb[1] {
+		if btn.CallbackData == "no-callback" {
+			t.Errorf("row1[%d] is still the removed spacer button", i)
+		}
 	}
 	// block carries the SEPARATE block token and NO mid — blocking a sender, not a
 	// message. It must never carry the mid-bound token (that token is the S-0001
 	// binding for the id-acting verbs).
-	if kb[1][2].CallbackData != "block|TOKBLK" {
-		t.Errorf("block data = %q; want block|TOKBLK (separate token, no mid)", kb[1][2].CallbackData)
+	if kb[1][1].CallbackData != "block|TOKBLK" {
+		t.Errorf("block data = %q; want block|TOKBLK (separate token, no mid)", kb[1][1].CallbackData)
 	}
 
 	// with "seen": the seen button is inserted at the FRONT of row0.

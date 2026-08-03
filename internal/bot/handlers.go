@@ -30,6 +30,15 @@ func (b *Bot) registerHandlers() {
 	// the conversation so it is never shadowed.
 	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("errmore|"), b.errMore))
 
+	// report action buttons — the accept/ban/message buttons under reports in
+	// REPORT_CHAT_ID. Also OUTSIDE prep: that chat is a channel, which prep drops.
+	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("rpt|"), b.reportAction))
+
+	// An admin's reply to a "write the message" prompt, in their own private chat.
+	// Ahead of the conversations so the reply is not consumed as an anonymous
+	// message; the filter only matches replies to the bot's own prompt.
+	d.AddHandler(handlers.NewMessage(b.rptComposeFilter(botIDInt(b.Cfg.BotID)), b.topLevel(rptComposeReply)))
+
 	// no_callback_handler — answers the spacer / "sent with link" buttons.
 	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("no-callback"), b.topLevel(noCallback)))
 
@@ -54,6 +63,7 @@ func (b *Bot) registerHandlers() {
 	b.command("privacy", cmdPrivacy)
 	b.command("donate", cmdDonate)
 	b.command("admin", adminCmd)
+	b.command("admin_donate", adminDonateCmd)
 	b.command("myuid", cmdMyUID)
 	b.command("bug", cmdBug)
 
@@ -241,7 +251,10 @@ func cmdHelp(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, _ string) error {
 	if err != nil {
 		return err
 	}
-	txt = strings.ReplaceAll(txt, "%s", b.Cfg.DonationLink)
+	// b.Dyn, not b.Cfg: an admin who changes the donation link with /admin_donate
+	// must change it everywhere it appears, otherwise the button and the texts
+	// would point at two different places.
+	txt = strings.ReplaceAll(txt, "%s", b.Dyn.DonationLink())
 	return b.replyHTML(ctx, txt, true)
 }
 
@@ -263,7 +276,7 @@ func cmdDonate(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, _ string) error {
 	if err != nil {
 		return err
 	}
-	txt = strings.ReplaceAll(txt, "%s", b.Cfg.DonationLink)
+	txt = strings.ReplaceAll(txt, "%s", b.Dyn.DonationLink())
 	return b.replyHTML(ctx, txt, false)
 }
 

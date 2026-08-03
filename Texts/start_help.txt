@@ -22,6 +22,5 @@
 %s
 
 <blockquote expandable>ارتباط با ما:
-• t.me/ChevaletBotNews (کانال اخبار)
-• t.me/Chevalet_bot?start=Chevaletsupport (پشتیبانی)
-• t.me/Chevalet_bot?start=Programmer (برنامه‌نویس)</blockquote>
+• https://t.me/chevalet_studio (کانال اخبار)
+• https://t.me/chevalet_studio?direct (پشتیبانی و برنامه‌نویس)</blockquote>

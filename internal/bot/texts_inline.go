@@ -60,8 +60,14 @@ const (
 	txtNotBlockedNow  = "همین الانش بلاک نیس"
 
 	// report callbacks
-	txtReportConfirm          = "آیا واقعا میخواهید این پیام را گزارش کنید؟"
-	txtReportCancelled        = "لغو شد"
+	txtReportConfirm   = "آیا واقعا میخواهید این پیام را گزارش کنید؟"
+	txtReportCancelled = "لغو شد"
+
+	// txtBannedNotice is sent to a user an admin bans from a report. Only the ban
+	// is announced: the user finds out anyway when the bot stops answering, so
+	// saying it plainly is clearer, while a merely-registered report stays silent.
+	txtBannedNotice = "🚫 دسترسی شما به این بات بسته شد.\n\n" +
+		"دلیلش گزارش‌های کاربران دیگه از پیام‌های شما بوده. اگر فکر می‌کنید اشتباهی پیش اومده، از طریق کانال با ما در تماس باشید."
 	txtReportedFromTargetChat = "این پیام از چت گیرنده کپی شد. ممکنه تهش تگ دلخواه داشته باشه"
 	btnReportYes              = "✅ آره ریپورتش کن"
 	btnReportNo               = "❌ نهههه"

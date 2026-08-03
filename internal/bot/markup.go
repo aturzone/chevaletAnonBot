@@ -68,15 +68,18 @@ func messageKeyboard(tokenMid, tokenBlock string, mid int64, seen bool) [][]gotg
 	return [][]gotgbot.InlineKeyboardButton{
 		firstRow,
 		{
+			// The Python original put a blank " " button between these two as a
+			// spacer. Removed by request: it did nothing, and Telegram spreads the
+			// two real buttons across the row anyway.
 			cb(msgBtnReport, "report|"+tokenMid+"|"+midStr),
-			cb(" ", "no-callback"),
 			cb(msgBtnBlock, "block|"+tokenBlock),
 		},
 	}
 }
 
 // donationRow mirrors the trailing donation-link button row appended to every
-// delivered message's keyboard.
+// delivered message's keyboard. Only appended when an admin has enabled it
+// (/admin_donate active) — it is off by default.
 func donationRow(donationLink string) []gotgbot.InlineKeyboardButton {
 	return []gotgbot.InlineKeyboardButton{urlBtn(btnDonation, donationLink)}
 }
