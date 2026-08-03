@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aturzone/chevaletAnonBot/internal/config"
+	"github.com/aturzone/chevaletAnonBot/internal/encoder"
 )
 
 func TestErrReportStoreEviction(t *testing.T) {
@@ -98,5 +99,59 @@ func TestAllowDBErrReport(t *testing.T) {
 	b.lastDBErr = time.Now().Add(-31 * time.Second)
 	if !b.allowDBErrReport() {
 		t.Fatal("a report after the window should be allowed again")
+	}
+}
+
+// TestErrDeepLink locks the error-report deep link. It is now the ONLY way into
+// the detail pages, since the channel button cannot be a callback button.
+func TestErrDeepLink(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		code := encoder.GenerateCID(8)
+		payload := errDeepLinkPrefix + code
+		if len(payload) > 64 {
+			t.Fatalf("payload %q is %d chars (>64)", payload, len(payload))
+		}
+		for j := 0; j < len(payload); j++ {
+			c := payload[j]
+			ok := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+				(c >= '0' && c <= '9') || c == '_' || c == '-'
+			if !ok {
+				t.Fatalf("payload %q has %q, which Telegram rejects in a /start payload", payload, c)
+			}
+		}
+		// startCmd routes on prefixes; these must stay mutually exclusive or an
+		// error link would be handled as a report link (or as someone's cid).
+		if strings.HasPrefix(payload, "UNBLOCK-") || strings.HasPrefix(payload, reportDeepLinkPrefix) {
+			t.Fatalf("payload %q collides with another deep-link prefix", payload)
+		}
+		if strings.TrimPrefix(payload, errDeepLinkPrefix) != code {
+			t.Fatalf("round-trip of %q lost the code", payload)
+		}
+	}
+}
+
+// TestMoreLinkButtonIsAUrl is the regression guard for the actual bug: the button
+// posted into the error CHANNEL must be a URL button. A callback button there is
+// silently dead — the tap never reaches the bot.
+func TestMoreLinkButtonIsAUrl(t *testing.T) {
+	kb := moreLinkButton("Chevalet_bot", "abc12345", 3)
+	if len(kb.InlineKeyboard) != 1 || len(kb.InlineKeyboard[0]) != 1 {
+		t.Fatalf("keyboard shape = %v; want a single button", kb.InlineKeyboard)
+	}
+	btn := kb.InlineKeyboard[0][0]
+	if btn.CallbackData != "" {
+		t.Errorf("channel button has callback_data %q; it must be a URL button only", btn.CallbackData)
+	}
+	want := "https://t.me/Chevalet_bot?start=" + errDeepLinkPrefix + "abc12345"
+	if btn.Url != want {
+		t.Errorf("url = %q; want %q", btn.Url, want)
+	}
+
+	// The in-private paging button, by contrast, MUST be a callback button.
+	pg := moreButton("abc12345", 1, 3)
+	pgBtn := pg.InlineKeyboard[0][0]
+	if pgBtn.Url != "" || pgBtn.CallbackData != "errmore|abc12345|1" {
+		t.Errorf("paging button = (url %q, data %q); want a callback with errmore|abc12345|1",
+			pgBtn.Url, pgBtn.CallbackData)
 	}
 }

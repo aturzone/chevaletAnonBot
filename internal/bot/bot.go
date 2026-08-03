@@ -268,8 +268,11 @@ func (b *Bot) reportIncident(tg *gotgbot.Bot, ctx *ext.Context, code, summary st
 		if chatID, perr := strconv.ParseInt(b.Cfg.ErrorChatID, 10, 64); perr == nil {
 			b.errReports.put(code, detailPages)
 			opts := &gotgbot.SendMessageOpts{ParseMode: "HTML"}
-			if len(detailPages) > 0 {
-				opts.ReplyMarkup = moreButton(code, 0, len(detailPages))
+			// A link button, not a callback one: ERROR_CHAT_ID is a channel and
+			// channel callback buttons never reach the bot, so the old "more" button
+			// did nothing. The link opens the detail in the admin's private chat.
+			if len(detailPages) > 0 && b.TG.User.Username != "" {
+				opts.ReplyMarkup = moreLinkButton(b.TG.User.Username, code, len(detailPages))
 			}
 			_, _ = tg.SendMessage(chatID, summary, opts)
 		}
