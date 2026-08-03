@@ -50,11 +50,9 @@ type Bot struct {
 	admins     map[string]bool
 	errReports *errReportStore
 
-	// floodUntil is a Telegram-imposed send pause (a 429 retry_after); see
-	// noteFloodWait. Guarded by floodMu together with the report throttle.
-	floodMu         sync.Mutex
-	floodUntil      time.Time
-	lastFloodReport time.Time
+	// limiter paces every outbound Telegram call and owns the flood pause. See
+	// ratelimit.go for why this lives at the BotClient layer.
+	limiter *sendLimiter
 
 	// convStores holds the three ConversationHandlers' state storages so a stale
 	// flow can be dropped when the user starts a different one. Without this, a
@@ -113,6 +111,8 @@ func (b *Bot) allowDBErrReport() bool {
 
 // New builds the Telegram bot, dispatcher and updater, and registers handlers.
 func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
+	limiter := newSendLimiter()
+
 	botOpts := &gotgbot.BotOpts{
 		RequestOpts: &gotgbot.RequestOpts{Timeout: 10 * time.Second},
 	}
@@ -128,6 +128,14 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 			DefaultRequestOpts: &gotgbot.RequestOpts{Timeout: 30 * time.Second},
 		}
 	}
+
+	// Every API call goes through the limiter — including the ones a future change
+	// adds, which is the point of doing it here rather than per call site.
+	base := botOpts.BotClient
+	if base == nil {
+		base = &gotgbot.BaseBotClient{DefaultRequestOpts: botOpts.RequestOpts}
+	}
+	botOpts.BotClient = &limitedClient{inner: base, limiter: limiter}
 
 	tg, err := gotgbot.NewBot(cfg.BotToken, botOpts)
 	if err != nil {
@@ -154,6 +162,7 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 		aiQueue:    newAIQueue(),
 		admins:     make(map[string]bool, len(cfg.Admins)),
 		errReports: newErrReportStore(50),
+		limiter:    limiter,
 	}
 	for _, a := range cfg.Admins {
 		b.admins[a] = true
@@ -319,38 +328,9 @@ func (b *Bot) reportToErrorChat(tg *gotgbot.Bot, text string) {
 // is recorded once and every outbound path checks it first. That is the difference
 // between a 90-second pause and the 607-second ban that was observed.
 
-// noteFloodWait records a Telegram-imposed wait, keeping the furthest deadline.
-func (b *Bot) noteFloodWait(seconds int64) {
-	if seconds <= 0 {
-		seconds = 5 // Telegram sometimes omits the value; back off a little anyway.
-	}
-	b.floodMu.Lock()
-	defer b.floodMu.Unlock()
-	until := time.Now().Add(time.Duration(seconds) * time.Second)
-	if until.After(b.floodUntil) {
-		b.floodUntil = until
-	}
-}
-
-// floodWaitRemaining reports how long Telegram still wants us to wait, 0 if clear.
-func (b *Bot) floodWaitRemaining() time.Duration {
-	b.floodMu.Lock()
-	defer b.floodMu.Unlock()
-	if d := time.Until(b.floodUntil); d > 0 {
-		return d
-	}
-	return 0
-}
+// noteFloodWait records a Telegram-imposed wait so every outbound call backs off.
+func (b *Bot) noteFloodWait(seconds int64) { b.limiter.noteFloodWait(seconds) }
 
 // allowFloodReport throttles the admin notice to one per two minutes, so a flood
 // does not produce a flood of reports about the flood.
-func (b *Bot) allowFloodReport() bool {
-	b.floodMu.Lock()
-	defer b.floodMu.Unlock()
-	now := time.Now()
-	if !b.lastFloodReport.IsZero() && now.Sub(b.lastFloodReport) < 2*time.Minute {
-		return false
-	}
-	b.lastFloodReport = now
-	return true
-}
+func (b *Bot) allowFloodReport() bool { return b.limiter.allowReport() }
