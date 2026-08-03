@@ -26,10 +26,18 @@ services:
     init: true
     env_file:
       - .env.prod
+    environment:
+      # Keep runtime-tunable settings (the donation button, AI url/session) on the
+      # mounted state dir below. The default is the working directory, which lives
+      # in the container's throwaway layer — every redeploy recreates the container
+      # and would silently reset whatever an admin had configured.
+      DYNSET_PATH: /app/state/dynamic_settings.json
     volumes:
       # Host backups dir -> where `/admin backup` reads the newest dump. Filled
       # hourly by deploy/go/backup.sh (cron). Absolute path = this server's deploy.
       - /opt/chevalet-go-staging/backups:/app/backups
+      # Survives redeploys — see DYNSET_PATH above.
+      - /opt/chevalet-go-staging/state:/app/state
     networks:
       - prod
     healthcheck:
