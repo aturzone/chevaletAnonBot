@@ -44,6 +44,11 @@ const (
 	rptVerbBan         = "b"
 	rptVerbMsgReporter = "mr"
 	rptVerbMsgReported = "md"
+	// rptVerbDone is the spent accept/ban row. It carries no token and does
+	// nothing, but it must still be answered: the generic no-callback handler runs
+	// under prep, which drops channel updates, so a tap there would leave the
+	// client spinning until it timed out.
+	rptVerbDone = "x"
 )
 
 // composeMarker tags the prompt the bot sends to an admin's private chat. The
@@ -75,7 +80,7 @@ func reportActionKeyboard(reporterToken, reportedToken string) gotgbot.InlineKey
 // second admin cannot double-ban or double-count the same report, and so the log
 // of who handled it survives in the channel.
 func rptDoneRow(label string) []gotgbot.InlineKeyboardButton {
-	return row(cb(label, "no-callback"))
+	return row(cb(label, "rpt|"+rptVerbDone+"|-"))
 }
 
 // adminLabel is a short human name for the admin who tapped, for the done label.
@@ -120,6 +125,15 @@ func (b *Bot) reportAction(tg *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 	verb, token := fields[1], fields[2]
+
+	// The spent status button: acknowledge and stop, before any token handling —
+	// it deliberately carries no token.
+	if verb == rptVerbDone {
+		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
+			Text: "این ریپورت قبلا بررسی شده.",
+		})
+		return nil
+	}
 
 	uid, ok := b.Tokens.Open(token, nil)
 	if !ok {

@@ -89,8 +89,11 @@ func TestRptMarkDoneReplacesOnlyActionRow(t *testing.T) {
 	if len(newRows) != 2 {
 		t.Fatalf("rows after mark-done = %d; want 2", len(newRows))
 	}
-	if len(newRows[0]) != 1 || newRows[0][0].CallbackData != "no-callback" {
-		t.Errorf("action row was not replaced by a dead status button: %+v", newRows[0])
+	// The status button must route to the rpt| handler, not the generic
+	// no-callback one: that handler runs under prep, which drops channel updates,
+	// so a tap in the report channel would never be answered.
+	if len(newRows[0]) != 1 || newRows[0][0].CallbackData != "rpt|"+rptVerbDone+"|-" {
+		t.Errorf("action row was not replaced by an answerable status button: %+v", newRows[0])
 	}
 	if !strings.Contains(newRows[0][0].Text, "@someadmin") {
 		t.Errorf("status button %q does not name the admin who acted", newRows[0][0].Text)
@@ -100,7 +103,7 @@ func TestRptMarkDoneReplacesOnlyActionRow(t *testing.T) {
 		t.Fatalf("message row buttons = %d; want 2 (still usable)", len(newRows[1]))
 	}
 	for _, btn := range newRows[1] {
-		if btn.CallbackData == "no-callback" {
+		if strings.HasPrefix(btn.CallbackData, "rpt|"+rptVerbDone+"|") {
 			t.Errorf("message button %q was disabled; it should stay usable", btn.Text)
 		}
 	}
