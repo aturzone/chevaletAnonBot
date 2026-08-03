@@ -234,6 +234,9 @@ func (b *Bot) adminDispatch(tg *gotgbot.Bot, ctx *ext.Context, userid string, te
 			return errWrongSyntax
 		}
 
+	case "donate":
+		return b.adminDonate(ctx, text)
+
 	case "backup":
 		return b.adminBackup(tg, ctx)
 

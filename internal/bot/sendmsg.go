@@ -234,8 +234,12 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 		// note in sendMsgTemplate — the decorator's deletion is dead code.)
 	}
 
-	// trailing donation row
-	keyboard = append(keyboard, donationRow(b.Cfg.DonationLink))
+	// Trailing donation row — only when an admin has switched it on, since the
+	// button was removed by request. Both the flag and the link are runtime
+	// settings (see /admin_donate), so turning it back on needs no redeploy.
+	if b.Dyn.DonationEnabled() {
+		keyboard = append(keyboard, donationRow(b.Dyn.DonationLink()))
+	}
 	replyMarkup := gotgbot.InlineKeyboardMarkup{InlineKeyboard: keyboard}
 
 	// media groups: stash everything and wait for the rest of the group.

@@ -54,6 +54,7 @@ func (b *Bot) registerHandlers() {
 	b.command("privacy", cmdPrivacy)
 	b.command("donate", cmdDonate)
 	b.command("admin", adminCmd)
+	b.command("admin_donate", adminDonateCmd)
 	b.command("myuid", cmdMyUID)
 	b.command("bug", cmdBug)
 
@@ -241,7 +242,10 @@ func cmdHelp(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, _ string) error {
 	if err != nil {
 		return err
 	}
-	txt = strings.ReplaceAll(txt, "%s", b.Cfg.DonationLink)
+	// b.Dyn, not b.Cfg: an admin who changes the donation link with /admin_donate
+	// must change it everywhere it appears, otherwise the button and the texts
+	// would point at two different places.
+	txt = strings.ReplaceAll(txt, "%s", b.Dyn.DonationLink())
 	return b.replyHTML(ctx, txt, true)
 }
 
@@ -263,7 +267,7 @@ func cmdDonate(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, _ string) error {
 	if err != nil {
 		return err
 	}
-	txt = strings.ReplaceAll(txt, "%s", b.Cfg.DonationLink)
+	txt = strings.ReplaceAll(txt, "%s", b.Dyn.DonationLink())
 	return b.replyHTML(ctx, txt, false)
 }
 
