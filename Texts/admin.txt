@@ -1,3 +1,6 @@
+🛡 <b>ADMIN COMMANDS</b>
+Everything button-friendly is also in <code>/menu</code> → 🛡 پنل ادمین (button 5, admins only). The commands below are the full set, including the ones that need typed arguments.
+🔸---------------
 <code>/admin help</code>: to get help
 🔸---------------
 <code>/admin send-mass-msg</code>: send mass message to users / reply the message you want to send to all the users
@@ -5,8 +8,9 @@
 🔸---------------
 <code>/admin user-count</code>: to get the number of users
 🔸---------------
-<code>/admin stats UID</code>: to get the status of the user
+<code>/admin stats UID</code>: to get the status of ONE user
    -> ban status, max number of cid's allowed
+   -> not to be confused with <code>/admin_stats</code> (bot-wide daily numbers)
 🔸---------------
 <code>/admin ban UID</code>: to ban a user
 <code>/admin unban UID</code>: to unban a user
@@ -35,5 +39,6 @@
 <code>/admin_donate deactive</code>: hide it (default)
 <code>/admin_donate link URL</code>: set the donation link
 <code>/admin_donate link reset</code>: reset the link to config default
+   -> <code>/admin donate …</code> is the same command in the /admin form
 🔸---------------
 <code>/admin backup</code>: send the last backup file

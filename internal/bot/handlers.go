@@ -42,6 +42,13 @@ func (b *Bot) registerHandlers() {
 	// no_callback_handler — answers the spacer / "sent with link" buttons.
 	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("no-callback"), b.topLevel(noCallback)))
 
+	// /menu panel buttons. Registered BEFORE the conversations so a user part-way
+	// through a settings or my_links flow can still reach the menu — a conversation
+	// state would otherwise get first refusal on the update. The "menu|" prefix is
+	// deliberately free of every substring the conversations' cqContains filters
+	// match on (see menu.go), so this cannot shadow them either.
+	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("menu|"), b.menuCallback))
+
 	// start_cmd_handler — the per-user conversation.
 	d.AddHandler(b.startConversation())
 
@@ -58,6 +65,9 @@ func (b *Bot) registerHandlers() {
 	// my_links and settings conversations.
 	d.AddHandler(b.myLinksConversation())
 	d.AddHandler(b.settingsConversation())
+
+	// The /menu panel entry point.
+	b.command("menu", menuCmd)
 
 	// remaining Phase 2/5 self-contained commands.
 	b.command("privacy", cmdPrivacy)
