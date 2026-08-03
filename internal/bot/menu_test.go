@@ -208,3 +208,82 @@ func hasDataInRow(r []gotgbot.InlineKeyboardButton, data string) bool {
 	}
 	return false
 }
+
+// TestMenuBarFilter is the safety test for the bar. The tap arrives as an ordinary
+// text message and the handler is registered ahead of the send state, so a filter
+// that matched too much would swallow real messages — including somebody's
+// anonymous message, which would be lost silently.
+func TestMenuBarFilter(t *testing.T) {
+	priv := func(text string) *gotgbot.Message {
+		return &gotgbot.Message{Text: text, Chat: gotgbot.Chat{Type: "private"}}
+	}
+
+	if !menuBarFilter(priv(menuBarButton)) {
+		t.Errorf("the bar's own label %q does not match its filter", menuBarButton)
+	}
+	// Telegram clients can pad the text; a tap must still register.
+	if !menuBarFilter(priv("  " + menuBarButton + " ")) {
+		t.Error("a padded bar tap did not match")
+	}
+
+	// Everything else must fall through to the normal handlers.
+	for _, text := range []string{
+		"", "منو", "🏠", "/menu", "سلام",
+		menuBarButton + " چیه",    // the label inside a longer message
+		"میخوام " + menuBarButton, // …and at the end
+		"🏠 منوی اصلی",             // a near-miss label
+	} {
+		if menuBarFilter(priv(text)) {
+			t.Errorf("filter claimed %q; a real message would be eaten", text)
+		}
+	}
+
+	// Not a private chat, and a nil message, must never match.
+	if menuBarFilter(&gotgbot.Message{Text: menuBarButton, Chat: gotgbot.Chat{Type: "supergroup"}}) {
+		t.Error("the bar filter matched outside a private chat")
+	}
+	if menuBarFilter(nil) {
+		t.Error("the bar filter matched a nil message")
+	}
+}
+
+// TestMenuBarKeyboard pins the bar to ONE button — the whole point of the redesign
+// was a single button, not a bar crowded with options.
+func TestMenuBarKeyboard(t *testing.T) {
+	kb := menuBarKeyboard()
+	if len(kb.Keyboard) != 1 || len(kb.Keyboard[0]) != 1 {
+		t.Fatalf("bar layout = %v; want exactly one button", kb.Keyboard)
+	}
+	if kb.Keyboard[0][0].Text != menuBarButton {
+		t.Errorf("bar button = %q; want %q (must equal what the filter matches)",
+			kb.Keyboard[0][0].Text, menuBarButton)
+	}
+	if !kb.IsPersistent {
+		t.Error("the bar is not persistent, so it collapses behind the keyboard icon")
+	}
+	if !kb.ResizeKeyboard {
+		t.Error("the bar is not resized, so it takes a full keyboard's height")
+	}
+}
+
+// TestSettingsAndLinksCanReachTheMenu covers the gap that was reported: entering
+// settings from the panel left no way back.
+func TestSettingsAndLinksCanReachTheMenu(t *testing.T) {
+	home := "menu|" + menuMain
+
+	if !hasData(ikb(settingsMainMenu()...), home) {
+		t.Error("the settings menu has no way back to /menu — a dead end")
+	}
+	if !hasData(ikb(mylinksDefaultMenu()...), home) {
+		t.Error("the my_links menu has no way back to /menu — a dead end")
+	}
+}
+
+// TestModerationScreensHaveAnExit checks the moderation list is not a dead end
+// either, on both the /admin_reports path and the panel path.
+func TestModerationScreensHaveAnExit(t *testing.T) {
+	if modBackToPanel().CallbackData != "menu|"+menuAdmin {
+		t.Errorf("the moderation exit points at %q; want the admin panel",
+			modBackToPanel().CallbackData)
+	}
+}

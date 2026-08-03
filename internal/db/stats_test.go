@@ -184,3 +184,37 @@ func TestStatsAndModeration(t *testing.T) {
 		t.Errorf("ghost reports = %d; want 1", ghost.Reports)
 	}
 }
+
+// TestMenuBarFlag covers the one-shot bar install. Existing rows must default to
+// "not sent" so the ~17k users who predate the bar still receive it, and the flag
+// must survive so nobody is nagged twice.
+func TestMenuBarFlag(t *testing.T) {
+	ctx := context.Background()
+	d, err := Connect(ctx, testConfig(t))
+	noErr(t, err, "Connect")
+	defer d.Close()
+	noErr(t, d.MakeTables(ctx), "MakeTables")
+
+	_, _ = d.pool.Exec(ctx, `DELETE FROM users WHERE uid='barflag'`)
+	if _, err := d.AddUser(ctx, "barflag", "Bar Flag"); err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+
+	sent, err := d.MenuBarSent(ctx, "barflag")
+	noErr(t, err, "MenuBarSent")
+	if sent {
+		t.Error("a fresh user already has the bar marked as sent, so they would never get it")
+	}
+
+	noErr(t, d.SetMenuBarSent(ctx, "barflag"), "SetMenuBarSent")
+	sent, err = d.MenuBarSent(ctx, "barflag")
+	noErr(t, err, "MenuBarSent after set")
+	if !sent {
+		t.Error("the flag did not persist, so the install notice would repeat forever")
+	}
+
+	// Setting it twice must be harmless (the call sites are best effort and may retry).
+	noErr(t, d.SetMenuBarSent(ctx, "barflag"), "SetMenuBarSent (again)")
+
+	_, _ = d.pool.Exec(ctx, `DELETE FROM users WHERE uid='barflag'`)
+}

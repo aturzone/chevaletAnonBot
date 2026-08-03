@@ -49,6 +49,12 @@ func (b *Bot) registerHandlers() {
 	// match on (see menu.go), so this cannot shadow them either.
 	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("menu|"), b.menuCallback))
 
+	// A tap on the persistent bar arrives as an ordinary text message, so it must be
+	// claimed BEFORE the start conversation's send state and before the catch-all —
+	// otherwise the label would be delivered as somebody's anonymous message. The
+	// filter matches only that exact text in a private chat.
+	d.AddHandler(handlers.NewMessage(menuBarFilter, b.topLevel(menuCmd)))
+
 	// start_cmd_handler — the per-user conversation.
 	d.AddHandler(b.startConversation())
 

@@ -60,6 +60,66 @@ const (
 // menuTitle is the panel's own heading, shown on the main screen.
 const menuTitle = "🏠 <b>منوی اصلی</b>\n\nیکی از گزینه‌ها رو انتخاب کن:"
 
+// menuBarButton is the single button in the persistent bar next to the input box
+// (a ReplyKeyboard). Deliberately ONE button: it opens the panel, and the panel
+// holds everything else. A bar crowded with every option is what this replaces.
+//
+// Tapping it sends this exact text, which menuBarFilter matches to reopen the
+// panel — so the label is effectively protocol and must match on both sides.
+const menuBarButton = "🏠 منو"
+
+// menuBarKeyboard is the bar. IsPersistent keeps it visible instead of collapsing
+// behind the keyboard icon; ResizeKeyboard keeps it one row tall.
+func menuBarKeyboard() gotgbot.ReplyKeyboardMarkup {
+	return gotgbot.ReplyKeyboardMarkup{
+		Keyboard:              [][]gotgbot.KeyboardButton{{{Text: menuBarButton}}},
+		IsPersistent:          true,
+		ResizeKeyboard:        true,
+		InputFieldPlaceholder: "پیامت رو بنویس…",
+	}
+}
+
+// ensureMenuBar installs the bar once per user.
+//
+// A ReplyKeyboard has to ride along on some message and then persists for that chat
+// forever, so this is a one-shot: the flag lives in the database (users
+// .menu_bar_sent) because the alternative is either never reaching the ~17k users
+// who predate the bar, or attaching a throwaway message to every single /menu.
+//
+// Best effort throughout — failing to install a convenience must not break /menu.
+func (b *Bot) ensureMenuBar(tg *gotgbot.Bot, ctx *ext.Context, userid string) {
+	dbctx, cancel := b.bg()
+	defer cancel()
+
+	sent, err := b.DB.MenuBarSent(dbctx, userid)
+	if err != nil {
+		slog.Warn("could not read the menu-bar flag", "err", err)
+		return
+	}
+	if sent {
+		return
+	}
+	if ctx.EffectiveChat == nil {
+		return
+	}
+	if _, err := tg.SendMessage(ctx.EffectiveChat.Id,
+		"👇 از این به بعد دکمه <b>منو</b> پایین صفحه همیشه در دسترسته.",
+		&gotgbot.SendMessageOpts{ParseMode: "HTML", ReplyMarkup: menuBarKeyboard()}); err != nil {
+		slog.Warn("could not install the menu bar", "err", err)
+		return
+	}
+	if err := b.DB.SetMenuBarSent(dbctx, userid); err != nil {
+		// Worst case the notice is shown again next time; better than losing the bar.
+		slog.Warn("could not record that the menu bar was installed", "err", err)
+	}
+}
+
+// menuBarFilter matches a tap on the bar: a private text message whose content is
+// exactly the button label.
+func menuBarFilter(m *gotgbot.Message) bool {
+	return m != nil && m.Chat.Type == "private" && strings.TrimSpace(m.Text) == menuBarButton
+}
+
 // panelTextLimit is where editing stops being safe. Telegram's hard cap is 4096;
 // privacy_safety.txt alone is ~3900, so a panel that grows a header would silently
 // fail to render. Past this, send a fresh message instead of editing.
@@ -90,8 +150,10 @@ func backRow() []gotgbot.InlineKeyboardButton {
 	return row(cb("↩️ برگشت به منو", "menu|"+menuMain))
 }
 
-// menuCmd handles /menu.
+// menuCmd handles /menu and a tap on the bar. It installs the bar first (once
+// ever), so a user who arrives by typing /menu ends up with the button too.
 func menuCmd(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	b.ensureMenuBar(tg, ctx, userid)
 	_, err := ctx.EffectiveMessage.Reply(tg, menuTitle, &gotgbot.SendMessageOpts{
 		ParseMode:   "HTML",
 		ReplyMarkup: mainMenuKeyboard(b.isAdmin(userid)),
@@ -201,12 +263,13 @@ func (b *Bot) menuCallback(tg *gotgbot.Bot, ctx *ext.Context) error {
 
 	case menuAdminReports:
 		_, _ = clbk.Answer(tg, nil)
+		// modList carries its own route back to the panel, so nothing is appended
+		// here — otherwise the button would appear twice on this path and be missing
+		// on the /admin_reports one.
 		text, kb, err := b.modList(false, 0)
 		if err != nil {
 			return err
 		}
-		// modList's own keyboard already navigates; add a way back to the panel.
-		kb.InlineKeyboard = append(kb.InlineKeyboard, row(cb("↩️ پنل ادمین", "menu|"+menuAdmin)))
 		return b.panelEdit(tg, ctx, text, kb)
 
 	case menuAdminDonate:
