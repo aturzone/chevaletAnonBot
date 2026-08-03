@@ -43,6 +43,7 @@ const (
 	menuPrivacy  = "privacy"
 	menuMyUID    = "myuid"
 	menuBug      = "bug"
+	menuBugSend  = "bugsend"
 	menuDonate   = "donate"
 
 	// Admin section.
@@ -162,14 +163,24 @@ func mainMenuKeyboard(isAdmin bool) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-// backRow is the navigation every sub-screen carries.
+// backRow returns to the main menu.
 func backRow() []gotgbot.InlineKeyboardButton {
 	return row(cb("↩️ برگشت به منو", "menu|"+menuMain))
+}
+
+// backRowTo returns to a NAMED screen. Sub-pages under راهنما used backRow, so
+// "back" from privacy or the bug page jumped past the help menu to the top —
+// losing the user's place instead of returning where they came from.
+func backRowTo(verb, label string) []gotgbot.InlineKeyboardButton {
+	return row(cb(label, "menu|"+verb))
 }
 
 // menuCmd handles /menu and a tap on the bar. It installs the bar first (once
 // ever), so a user who arrives by typing /menu ends up with the button too.
 func menuCmd(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	// Opening the menu abandons whatever the user was part-way through, so drop it
+	// rather than leaving a send state armed to swallow their next message.
+	b.dropConversations(ctx)
 	b.ensureMenuBar(tg, ctx, userid)
 	_, err := ctx.EffectiveMessage.Reply(tg, menuTitle, &gotgbot.SendMessageOpts{
 		ParseMode:   "HTML",
@@ -188,6 +199,10 @@ func (b *Bot) menuCallback(tg *gotgbot.Bot, ctx *ext.Context) error {
 	userid := strconv.FormatInt(clbk.From.Id, 10)
 	verb := strings.TrimPrefix(clbk.Data, "menu|")
 	admin := b.isAdmin(userid)
+
+	// Any menu navigation means the user has moved on from whatever flow they were
+	// in; see dropConversations for what goes wrong otherwise.
+	b.dropConversations(ctx)
 
 	// Every admin screen is gated here, not just hidden from the keyboard: the
 	// button data is guessable, and hiding a button is not a permission check.
@@ -225,7 +240,7 @@ func (b *Bot) menuCallback(tg *gotgbot.Bot, ctx *ext.Context) error {
 			return err
 		}
 		txt = strings.ReplaceAll(txt, "%s", b.Dyn.DonationLink())
-		return b.panelEdit(tg, ctx, txt, ikb(backRow()))
+		return b.panelEdit(tg, ctx, txt, ikb(backRowTo(menuHelp, "↩️ برگشت به راهنما")))
 
 	case menuPrivacy:
 		_, _ = clbk.Answer(tg, nil)
@@ -235,7 +250,7 @@ func (b *Bot) menuCallback(tg *gotgbot.Bot, ctx *ext.Context) error {
 		}
 		// Deliberately no added heading: this text is ~3900 chars and a header could
 		// push the edit past Telegram's 4096 limit.
-		return b.panelEdit(tg, ctx, txt, ikb(backRow()))
+		return b.panelEdit(tg, ctx, txt, ikb(backRowTo(menuHelp, "↩️ برگشت به راهنما")))
 
 	case menuDonate:
 		_, _ = clbk.Answer(tg, nil)
@@ -258,7 +273,28 @@ func (b *Bot) menuCallback(tg *gotgbot.Bot, ctx *ext.Context) error {
 		if err != nil {
 			return err
 		}
-		return b.panelEdit(tg, ctx, txt, ikb(backRow()))
+		// The page used to only EXPLAIN a Telegram bug while being labelled "report a
+		// bug", which reads as an invitation to report one. Now it is both.
+		return b.panelEdit(tg, ctx, txt, ikb(
+			row(cb("📨 گزارش باگ به ما", "menu|"+menuBugSend)),
+			backRowTo(menuHelp, "↩️ برگشت به راهنما"),
+		))
+
+	case menuBugSend:
+		prompt := "📨 <b>گزارش باگ</b>\n\n" +
+			"مشکل رو در جواب همین پیام بنویس تا برای تیم فرستاده بشه.\n" +
+			"برای انصراف /cancel رو بفرست.\n\n" +
+			"<code>" + bugMarker + "</code>"
+		if _, err := tg.SendMessage(clbk.From.Id, prompt, &gotgbot.SendMessageOpts{
+			ParseMode:   "HTML",
+			ReplyMarkup: gotgbot.ForceReply{ForceReply: true, InputFieldPlaceholder: "توضیح باگ…"},
+		}); err != nil {
+			_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
+				Text: "نشد الان بگیرم، بعدا امتحان کن.", ShowAlert: true})
+			return nil
+		}
+		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: "توضیح باگ رو بنویس ⤴️"})
+		return nil
 
 	// ---------------------------------------------------------------- admin
 	case menuAdmin:

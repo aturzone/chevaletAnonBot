@@ -57,6 +57,9 @@ func (b *Bot) myLinksTemplate(tg *gotgbot.Bot, ctx *ext.Context, userid string) 
 
 // myLinksCmd ports my_links_cmd (/my_links and the mylinks-menu callback).
 func myLinksCmd(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
+	// Same reason as settingsCmd: entering this flow ends the others, so a cid typed
+	// here cannot be claimed by a pending send state.
+	b.dropConversations(ctx)
 	if err := b.myLinksTemplate(tg, ctx, userid); err != nil {
 		return err
 	}

@@ -25,6 +25,9 @@ func answer(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	if clbk == nil || clbk.Data == "" {
 		return nil
 	}
+	// The reverse of the settings case: someone part-way through renaming themselves
+	// who taps "answer" must not have their reply captured by the settings state.
+	b.dropConversations(ctx)
 	if _, err := clbk.Answer(tg, nil); err != nil {
 		return err
 	}

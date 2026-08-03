@@ -1,6 +1,8 @@
 package bot
 
 import (
+	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -39,6 +41,10 @@ func (b *Bot) registerHandlers() {
 	// message; the filter only matches replies to the bot's own prompt.
 	d.AddHandler(handlers.NewMessage(b.rptComposeFilter(botIDInt(b.Cfg.BotID)), b.topLevel(rptComposeReply)))
 
+	// A user's reply to the "describe the bug" prompt. Ahead of the conversations
+	// and the catch-all for the same reason as the admin compose handler.
+	d.AddHandler(handlers.NewMessage(b.bugComposeFilter(botIDInt(b.Cfg.BotID)), b.topLevel(bugComposeReply)))
+
 	// no_callback_handler — answers the spacer / "sent with link" buttons.
 	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("no-callback"), b.topLevel(noCallback)))
 
@@ -60,6 +66,9 @@ func (b *Bot) registerHandlers() {
 
 	// media_group_handler — subsequent media of a group.
 	d.AddHandler(handlers.NewMessage(msgfilters.MediaGroup, b.topLevel(handleMedia)))
+
+	// The "سایر" toggle on a delivered message: reveals/hides report+block in place.
+	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("oth"), b.topLevel(otherActions)))
 
 	// delete_message_handler — the warning's "delete" button, standalone.
 	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("delete|"), b.topLevel(deleteMsgClbk)))
@@ -161,7 +170,7 @@ func (b *Bot) settingsConversation() handlers.Conversation {
 				handlers.NewCommand("cancel", b.prep(genericCancelCmd)),
 				handlers.NewMessage(msgfilters.All, b.prep(settingsCancelAll)),
 			},
-			StateStorage: conversation.NewInMemoryStorage(conversation.KeyStrategySenderAndChat),
+			StateStorage: b.newConvStore(),
 		},
 	)
 }
@@ -190,7 +199,7 @@ func (b *Bot) myLinksConversation() handlers.Conversation {
 				handlers.NewCommand("cancel", b.prep(genericCancelCmd)),
 				handlers.NewMessage(msgfilters.All, b.prep(othersWhileSending)),
 			},
-			StateStorage: conversation.NewInMemoryStorage(conversation.KeyStrategySenderAndChat),
+			StateStorage: b.newConvStore(),
 		},
 	)
 }
@@ -234,7 +243,7 @@ func (b *Bot) startConversation() handlers.Conversation {
 			// conversation to that chat, so their messages in the GM group are NOT
 			// captured by it and instead reach the AI handler. (Sender-only keying
 			// would have mis-routed GM-group replies into a stale private state.)
-			StateStorage: conversation.NewInMemoryStorage(conversation.KeyStrategySenderAndChat),
+			StateStorage: b.newConvStore(),
 		},
 	)
 }
@@ -323,4 +332,36 @@ func cmdBug(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, _ string) error {
 		},
 	})
 	return err
+}
+
+// newConvStore creates a conversation state storage AND registers it, so the menu
+// (and any other flow switch) can drop a stale conversation.
+//
+// Why this is needed: the three ConversationHandlers are independent state
+// machines, and handler order decides which one claims a plain text message. The
+// start conversation is registered first, so a user who was part-way through
+// composing a message and then went to settings to change their name had that name
+// delivered as the message — to the wrong person, silently. Whoever begins a new
+// flow now clears the others first.
+func (b *Bot) newConvStore() conversation.Storage {
+	s := conversation.NewInMemoryStorage(conversation.KeyStrategySenderAndChat)
+	b.convStores = append(b.convStores, s)
+	return s
+}
+
+// dropConversations ends every pending conversation for this user+chat.
+//
+// Safe to call from inside a conversation handler: the framework applies whatever
+// state that handler returns after it finishes, so clearing first only discards
+// what was already there.
+//
+// KeyStrategySenderAndChat derives the key from the sender and chat, both of which
+// a callback query carries — so this targets the right user whether it was reached
+// from a tap or a command.
+func (b *Bot) dropConversations(ctx *ext.Context) {
+	for _, s := range b.convStores {
+		if err := s.Delete(ctx); err != nil && !errors.Is(err, conversation.ErrKeyNotFound) {
+			slog.Warn("could not drop a pending conversation", "err", err)
+		}
+	}
 }

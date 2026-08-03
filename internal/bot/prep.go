@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 
@@ -128,6 +129,25 @@ func (b *Bot) handleErr(tg *gotgbot.Bot, ctx *ext.Context, err error) error {
 		return nil
 	case errForbidden(err): // covers "bot was blocked by the user" / "not a member"
 		return nil
+	case floodSeconds(err) > 0 || isFloodErr(err):
+		// A Telegram 429 is load, not a bug. Filing it as an incident was actively
+		// harmful: each incident posts to ERROR_CHAT_ID and replies a tracking code,
+		// so a rate limit produced two MORE sends per occurrence on a bot already
+		// over its limit — 321 of them in nine hours. Record the wait so outbound
+		// paths stop pushing, tell the user plainly, and notify admins at most once
+		// every two minutes.
+		secs := floodSeconds(err)
+		b.noteFloodWait(secs)
+		slog.Warn("telegram rate limit", "retry_after_s", secs)
+		if ctx.EffectiveMessage != nil {
+			_, _ = ctx.EffectiveMessage.Reply(tg, txtTooManyRequests, nil)
+		}
+		if b.allowFloodReport() {
+			b.reportToErrorChat(tg, fmt.Sprintf(
+				"⏳ Telegram rate limit (429). retry_after=%ds — sending is paused until it clears.", secs))
+		}
+		return nil
+
 	case isDBError(err):
 		if ctx.EffectiveMessage != nil {
 			_, _ = ctx.EffectiveMessage.Reply(tg, txtDBProblem, nil)

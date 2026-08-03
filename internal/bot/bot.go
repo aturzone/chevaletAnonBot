@@ -5,7 +5,6 @@ package bot
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"html"
 	"log/slog"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/conversation"
 
 	"github.com/aturzone/chevaletAnonBot/internal/config"
 	"github.com/aturzone/chevaletAnonBot/internal/db"
@@ -49,6 +49,19 @@ type Bot struct {
 	aiQueue    *aiQueue
 	admins     map[string]bool
 	errReports *errReportStore
+
+	// floodUntil is a Telegram-imposed send pause (a 429 retry_after); see
+	// noteFloodWait. Guarded by floodMu together with the report throttle.
+	floodMu         sync.Mutex
+	floodUntil      time.Time
+	lastFloodReport time.Time
+
+	// convStores holds the three ConversationHandlers' state storages so a stale
+	// flow can be dropped when the user starts a different one. Without this, a
+	// user part-way through composing a message who goes to settings and types a
+	// new name has that text delivered as the message: the start conversation is
+	// registered first, so its send state claims the update. See dropConversations.
+	convStores []conversation.Storage
 
 	// dbErrMu/lastDBErr throttle the "PostgreSQL ERROR" reports to ERROR_CHAT_ID:
 	// during a brief DB outage every one of (10k users × concurrent) updates hits
@@ -221,11 +234,11 @@ func (b *Bot) onError(tg *gotgbot.Bot, ctx *ext.Context, err error) ext.Dispatch
 	code := encoder.GenerateCID(8)
 
 	// Build the update dump once; it goes both to the logs and to the paged report.
+	// REDACTED — see redactUpdate. This is an anonymous-messaging bot, and the raw
+	// dump carried users' message bodies into the error channel and the logs.
 	var updateJSON string
 	if ctx != nil && ctx.Update != nil {
-		if raw, jerr := json.MarshalIndent(ctx.Update, "", "  "); jerr == nil {
-			updateJSON = string(raw)
-		}
+		updateJSON = redactUpdate(ctx.Update)
 	}
 	slog.Error("handler error", "code", code, "err", err, "update", updateJSON)
 
@@ -297,4 +310,47 @@ func (b *Bot) reportToErrorChat(tg *gotgbot.Bot, text string) {
 		return
 	}
 	_, _ = tg.SendMessage(chatID, text, nil)
+}
+
+// --- Telegram flood-wait handling -------------------------------------------
+//
+// A 429 means the bot is over Telegram's send rate. Continuing to send while a
+// retry_after is pending is what turns a short wait into a long one, so the wait
+// is recorded once and every outbound path checks it first. That is the difference
+// between a 90-second pause and the 607-second ban that was observed.
+
+// noteFloodWait records a Telegram-imposed wait, keeping the furthest deadline.
+func (b *Bot) noteFloodWait(seconds int64) {
+	if seconds <= 0 {
+		seconds = 5 // Telegram sometimes omits the value; back off a little anyway.
+	}
+	b.floodMu.Lock()
+	defer b.floodMu.Unlock()
+	until := time.Now().Add(time.Duration(seconds) * time.Second)
+	if until.After(b.floodUntil) {
+		b.floodUntil = until
+	}
+}
+
+// floodWaitRemaining reports how long Telegram still wants us to wait, 0 if clear.
+func (b *Bot) floodWaitRemaining() time.Duration {
+	b.floodMu.Lock()
+	defer b.floodMu.Unlock()
+	if d := time.Until(b.floodUntil); d > 0 {
+		return d
+	}
+	return 0
+}
+
+// allowFloodReport throttles the admin notice to one per two minutes, so a flood
+// does not produce a flood of reports about the flood.
+func (b *Bot) allowFloodReport() bool {
+	b.floodMu.Lock()
+	defer b.floodMu.Unlock()
+	now := time.Now()
+	if !b.lastFloodReport.IsZero() && now.Sub(b.lastFloodReport) < 2*time.Minute {
+		return false
+	}
+	b.lastFloodReport = now
+	return true
 }

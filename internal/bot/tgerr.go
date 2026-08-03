@@ -3,6 +3,7 @@ package bot
 import (
 	"errors"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
@@ -88,4 +89,51 @@ func isNetworkError(err error) bool {
 	}
 	var uerr *url.Error
 	return errors.As(err, &uerr)
+}
+
+// errTooManyRequests matches a Telegram 429 flood wait, and returns how long
+// Telegram asked us to wait.
+//
+// This is NOT a bug, and treating it as one made a flood worse: every 429 was
+// filed as an incident, and each incident posts to ERROR_CHAT_ID and replies a
+// tracking code to the user — so a rate limit produced two more sends per
+// occurrence, on a bot that was already over its limit. 321 of them were logged in
+// nine hours of normal traffic.
+//
+// Telegram reports the wait in TelegramError.ResponseParams.RetryAfter, and also
+// in the description ("Too Many Requests: retry after 251") — the description is
+// parsed as a fallback because the field is only populated for some errors.
+func errTooManyRequests(err error) (retryAfter int64, ok bool) {
+	te := asTelegramError(err)
+	if te == nil {
+		return 0, false
+	}
+	if te.Code != 429 && !strings.Contains(strings.ToLower(te.Description), "too many requests") {
+		return 0, false
+	}
+	if te.ResponseParams != nil && te.ResponseParams.RetryAfter > 0 {
+		return te.ResponseParams.RetryAfter, true
+	}
+	if i := strings.LastIndex(strings.ToLower(te.Description), "retry after "); i >= 0 {
+		if n, cerr := strconv.ParseInt(strings.TrimSpace(te.Description[i+len("retry after "):]), 10, 64); cerr == nil {
+			return n, true
+		}
+	}
+	return 0, true
+}
+
+// floodSeconds returns the retry_after of a 429, or 0 if err is not one.
+func floodSeconds(err error) int64 {
+	n, ok := errTooManyRequests(err)
+	if !ok {
+		return 0
+	}
+	return n
+}
+
+// isFloodErr reports whether err is a 429 at all, including one Telegram sent
+// without a retry_after value.
+func isFloodErr(err error) bool {
+	_, ok := errTooManyRequests(err)
+	return ok
 }

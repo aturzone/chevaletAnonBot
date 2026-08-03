@@ -94,6 +94,11 @@ const (
 	// unblock-me-again button on /start UNBLOCK reply
 	btnBlockAgain = "پشیمون شدم دوباره بلاکش کن خخ"
 
+	// Telegram-imposed flood wait (HTTP 429). Shown instead of an error code: this
+	// is the bot being busy, not a fault the user can do anything about but retry.
+	txtTooManyRequests = "الان یه کم شلوغه و تلگرام جلوی ارسال رو گرفته 😮‍💨\n" +
+		"چند لحظه صبر کن و دوباره بفرست."
+
 	// outbound rate limit (Go-only hardening; generous threshold, see allowSend)
 	txtTooFast = "یه کم آروم‌تر! بیش از حد پیام فرستادی، چند لحظه صبر کن و دوباره امتحان کن."
 
