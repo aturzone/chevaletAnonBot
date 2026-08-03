@@ -128,9 +128,25 @@ To live-test against a throwaway PostgreSQL isolated from production (with a
 
 ## Production deployment & cutover
 
-For deploying, and for the near-zero-downtime cutover from the original Python
-bot to this Go bot — they share the same database schema, so no data migration
-is needed — see [`MIGRATION.md`](MIGRATION.md).
+Production deploys are **tag-driven**: pushing a `vX.Y.Z` tag is what ships
+code. Pushing to `main` runs the tests but does *not* touch production.
+
+```sh
+git tag -a v1.2.0 -m "what changed"
+git push origin v1.2.0        # CI tests it, then deploys that exact tag
+```
+
+To roll back (or redeploy any earlier version), run the **CI** workflow from the
+Actions tab with the target tag as input — no new tag or rebuild needed, since
+each release keeps its own image on the server.
+
+The full release/rollback runbook, the server-side script, and how the
+forced-command restriction on the deploy key works are documented in
+[`deploy/go/RELEASING.md`](deploy/go/RELEASING.md).
+
+For the near-zero-downtime cutover from the original Python bot to this Go bot —
+they share the same database schema, so no data migration is needed — see
+[`MIGRATION.md`](MIGRATION.md).
 
 ## Contributing
 

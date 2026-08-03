@@ -36,6 +36,12 @@ CI (`.github/workflows/ci.yml`) runs build, vet, gofmt-check, and
 itself automatically when `DB_HOST` is unset, so CI runs everything except
 that one without needing a database.
 
+Production deploys are **tag-driven**: pushing a `vX.Y.Z` tag deploys that exact
+tag; pushing to `main` only runs the tests. Rollback is a `workflow_dispatch` run
+with an older tag. Don't add a branch-push deploy back —
+[`deploy/go/RELEASING.md`](deploy/go/RELEASING.md) explains the flow and why the
+server-side forced command validates the tag itself.
+
 To live-test end-to-end against a throwaway Postgres with a staging bot
 token, use the isolated stack in [`deploy/go/`](deploy/go/README.md) (needs
 `PROXY` — Telegram is generally unreachable without one).
