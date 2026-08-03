@@ -37,6 +37,8 @@ IMAGE=chevalet-go-bot
 LOGFILE=/var/log/chevalet-deploy.log
 KEEP_IMAGES=5          # versioned images retained for instant rollback
 HEALTH_TIMEOUT=180     # seconds to wait for the container to report healthy
+POLL_TIMEOUT=90        # seconds to wait for proof that Telegram polling started
+SETTLE_SECONDS=20      # quiet period used to detect a crash-loop after startup
 
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$LOGFILE"; }
 die() { log "FAILED: $*"; exit 1; }
@@ -115,10 +117,10 @@ for _ in $(seq 1 "$HEALTH_TIMEOUT"); do
     sleep 1
 done
 
-if [[ "$healthy" != true ]]; then
-    log "UNHEALTHY after deploy of $TAG — rolling back to ${PREV_COMMIT:0:7}"
+rollback() {
+    log "$1 — rolling back to ${PREV_COMMIT:0:7}"
     docker logs "$CONTAINER" --tail 30 >>"$LOGFILE" 2>&1 || true
-    prev_tag="${PREV_IMAGE##*:}"
+    local prev_tag="${PREV_IMAGE##*:}"
     [[ -z "$prev_tag" || "$prev_tag" == "$PREV_IMAGE" ]] && prev_tag=prod
     # No --build on the way back: the previous image is already on disk, and a
     # rollback must not depend on a build succeeding.
@@ -127,8 +129,60 @@ if [[ "$healthy" != true ]]; then
     else
         log "ROLLBACK FAILED — manual intervention needed on $CONTAINER"
     fi
-    die "$TAG did not become healthy; production left on the previous version"
+    die "$TAG was not verified live; production left on the previous version"
+}
+
+if [[ "$healthy" != true ]]; then
+    rollback "UNHEALTHY after deploy of $TAG"
 fi
+
+# --------------------------------------------------- verify it is actually LIVE
+# `healthy` is necessary but NOT sufficient. The healthcheck is a bare TCP connect
+# to the health port, and main.go opens that listener BEFORE Run() calls
+# StartPolling — so a container reports healthy before it has ever reached
+# Telegram. If polling then fails, main exits, Docker's restart policy loops it,
+# and without this check the deploy would already have been reported green.
+#
+# So require positive evidence from THIS container start: the "bot polling" line
+# (which is only logged after StartPolling succeeded, i.e. Telegram accepted
+# getUpdates), then confirm it stays up rather than crash-looping.
+started_at=$(docker inspect --format '{{.State.StartedAt}}' "$CONTAINER")
+restarts_before=$(docker inspect --format '{{.RestartCount}}' "$CONTAINER")
+
+log "waiting for evidence of live polling (timeout ${POLL_TIMEOUT}s)"
+polling=false
+for _ in $(seq 1 "$POLL_TIMEOUT"); do
+    if docker logs "$CONTAINER" --since "$started_at" 2>&1 | grep -q 'msg="bot polling"'; then
+        polling=true; break
+    fi
+    [[ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" != true ]] \
+        && { log "container exited before it reported polling"; break; }
+    sleep 1
+done
+[[ "$polling" == true ]] || rollback "$TAG never reported 'bot polling' (Telegram unreachable?)"
+
+# A crash-loop can still look healthy in snapshots, because each fresh start
+# re-opens the health port. Compare restart counts across a settle window.
+log "settling ${SETTLE_SECONDS}s to rule out a crash-loop"
+sleep "$SETTLE_SECONDS"
+restarts_after=$(docker inspect --format '{{.RestartCount}}' "$CONTAINER")
+running_now=$(docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null || echo false)
+
+[[ "$running_now" == true ]] || rollback "$TAG stopped running during the settle window"
+if [[ "$restarts_after" != "$restarts_before" ]]; then
+    rollback "$TAG is crash-looping (restart count $restarts_before -> $restarts_after)"
+fi
+if docker logs "$CONTAINER" --since "$started_at" 2>&1 | grep -qE 'panic: |level=FATAL'; then
+    rollback "$TAG panicked after starting"
+fi
+
+# Deliberately NOT a rollback trigger: a single level=ERROR right after start is
+# usually ordinary traffic (e.g. a send to a user who blocked the bot). Surfacing
+# it beats auto-reverting a good release on a benign error.
+errs=$(docker logs "$CONTAINER" --since "$started_at" 2>&1 | grep -c 'level=ERROR' || true)
+[[ "$errs" -gt 0 ]] && log "note: $errs level=ERROR line(s) since start — not treated as deploy failure"
+
+log "verified live: polling up, no crash-loop, no panic"
 
 # `:prod` stays a moving pointer at whatever is live, so CUTOVER.md's manual
 # commands and anything else referencing :prod keep working.

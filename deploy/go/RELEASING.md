@@ -72,9 +72,31 @@ the box; it can only deploy some tag that already exists in this repo.
    re-pointed at it afterwards). Skips `--build` when that version's image is
    already on disk.
 5. Waits up to 180s for the container's healthcheck to report `healthy`.
-6. **Rolls back automatically** to the previous commit and image if it doesn't,
-   logs the container's last 30 lines, and exits non-zero so CI goes red.
-7. Prunes versioned images beyond the newest 5.
+6. Waits up to 90s for the `bot polling` log line from *this* container start,
+   then settles 20s and re-checks that the container is still running and its
+   restart count hasn't moved.
+7. **Rolls back automatically** to the previous commit and image if any of that
+   fails, logs the container's last 30 lines, and exits non-zero so CI goes red.
+8. Prunes versioned images beyond the newest 5.
+
+### Why healthy alone isn't enough
+
+The Docker healthcheck is a bare TCP connect to the health port, and `main.go`
+opens that listener *before* `Run()` calls `StartPolling` — so a container reports
+`healthy` before it has ever reached Telegram. If polling then fails, `main`
+exits, the restart policy loops the container, and each fresh start re-opens the
+health port, so snapshots keep looking fine. A deploy could therefore be reported
+green while the bot was dead to users.
+
+Hence the two extra gates: the `bot polling` line is positive proof that
+`StartPolling` returned successfully (Telegram accepted `getUpdates`), and the
+restart-count comparison across a settle window catches a crash-loop that
+instantaneous checks miss.
+
+A single `level=ERROR` after start is **not** a rollback trigger — that is often
+ordinary traffic, such as a send to a user who has blocked the bot. Those lines
+are counted and logged instead, because auto-reverting a good release on a benign
+error would be worse than surfacing it. `panic:` and `level=FATAL` do roll back.
 
 Every run appends to `/var/log/chevalet-deploy.log` on the server.
 
