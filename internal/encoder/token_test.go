@@ -46,13 +46,52 @@ func TestTokenTamperRejected(t *testing.T) {
 	tc := NewTokenCipher(testBotToken)
 	tok, _ := tc.Seal(1000000002, nil)
 	b := []byte(tok)
-	for _, i := range []int{0, len(b) / 2, len(b) - 1} {
+	// Every position, not a sample of three: the flip is cheap and a gap here is
+	// a gap in the tamper guarantee. This used to test only 0, len/2 and len-1,
+	// and the len-1 case was the one that misbehaved (see below).
+	for i := range b {
 		orig := b[i]
 		b[i] = flipChar(orig)
 		if _, ok := tc.Open(string(b), nil); ok {
-			t.Errorf("tampered token (byte %d) opened; want reject", i)
+			t.Errorf("tampered token (byte %d of %d) opened; want reject", i, len(b))
 		}
 		b[i] = orig
+	}
+}
+
+// TestTokenCanonical pins down that a token has exactly ONE valid string form.
+//
+// The last base64 char carries 2 bits that are not payload (23 bytes = 184 bits
+// into 31 chars = 186 bits). While Open used the non-strict decoder those bits
+// were ignored, so all 4 values of that char opened to the same uid, and
+// TestTokenTamperRejected only noticed when the flip happened to cross that
+// boundary — a ~6%-of-runs failure that read as flakiness rather than as the real
+// finding. Asserting canonicality directly makes a regression here deterministic.
+func TestTokenCanonical(t *testing.T) {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	tc := NewTokenCipher(testBotToken)
+	uid := int64(1000000002)
+
+	// Seal many tokens so every possible value of the final char gets covered,
+	// rather than depending on which one this run's random nonce happened to yield.
+	for n := 0; n < 200; n++ {
+		tok, err := tc.Seal(uid, nil)
+		if err != nil {
+			t.Fatalf("Seal: %v", err)
+		}
+		opened := 0
+		for i := 0; i < len(alphabet); i++ {
+			variant := tok[:len(tok)-1] + string(alphabet[i])
+			if _, ok := tc.Open(variant, nil); ok {
+				opened++
+				if variant != tok {
+					t.Errorf("non-canonical token opened: %q (canonical %q)", variant, tok)
+				}
+			}
+		}
+		if opened != 1 {
+			t.Fatalf("%d final-char variants of %q opened; want exactly 1", opened, tok)
+		}
 	}
 }
 
