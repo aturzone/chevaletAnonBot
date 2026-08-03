@@ -17,7 +17,10 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    image: chevalet-go-bot:prod
+    # IMAGE_TAG is set by deploy-tag.sh to the version being deployed, so each
+    # release keeps its own image and rolling back reuses one instead of
+    # rebuilding. Unset (i.e. any manual `docker compose` run) behaves as before.
+    image: chevalet-go-bot:${IMAGE_TAG:-prod}
     container_name: chevalet-go-bot-prod
     restart: unless-stopped
     init: true

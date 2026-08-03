@@ -3,7 +3,16 @@ name: CI
 on:
   push:
     branches: ["**"]
+    # Pushing a vX.Y.Z tag is what deploys to production — see the deploy job.
+    tags: ["v*.*.*"]
   pull_request:
+  # Redeploy or roll back to any existing tag without pushing a new one.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to deploy to production (e.g. v1.1.0)"
+        required: true
+        type: string
 
 jobs:
   build-test:
@@ -11,6 +20,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # On workflow_dispatch, test the tag being deployed rather than
+          # whatever branch the run was launched from — otherwise the gate in
+          # front of a rollback would be testing unrelated code. Empty for
+          # push/pull_request, where the default checkout is already correct.
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -39,16 +54,21 @@ jobs:
         run: go test -race -count=1 ./...
 
   deploy:
-    name: deploy to production
+    name: deploy ${{ github.event.inputs.tag || github.ref_name }} to production
     needs: build-test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Deploys are deliberate: either a vX.Y.Z tag was pushed, or someone asked
+    # for a specific tag via the Run workflow button. Never on a branch push,
+    # never on a PR — pushing to main no longer touches production.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    environment: production
     steps:
       # The server's authorized_keys entry for this key is forced-command
-      # restricted, so it can only ever run one exact deploy command
-      # regardless of what's requested here — this script is documentation,
-      # the server enforces the actual command. This is the LIVE bot serving
-      # real users, so this only runs on main, never on other branches/PRs.
+      # restricted to /usr/local/bin/deploy-chevalet.sh (source of truth:
+      # deploy/go/deploy-tag.sh). That script accepts nothing but a semver tag
+      # name, so this key cannot run anything else on the box no matter what is
+      # requested here. The script checks out that exact tag, rebuilds, waits for
+      # the container to report healthy, and rolls back by itself if it doesn't.
       - name: SSH deploy
         uses: appleboy/ssh-action@v1
         with:
@@ -56,4 +76,4 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: cd /opt/chevalet-go-staging && git pull --ff-only && cd deploy/go && docker compose -p go -f docker-compose.cutover.yml up -d --build
+          script: deploy ${{ github.event.inputs.tag || github.ref_name }}
