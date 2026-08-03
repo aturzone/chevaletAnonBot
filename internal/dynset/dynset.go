@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 )
@@ -62,6 +63,14 @@ func (s *Settings) save() {
 	if err != nil {
 		slog.Error("dynset: failed to marshal", "err", err)
 		return
+	}
+	// The path can point into a mounted directory that exists only as a mount
+	// point, so create the parent rather than losing the setting to ENOENT.
+	if dir := filepath.Dir(s.path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			slog.Error("dynset: failed to create settings dir", "dir", dir, "err", err)
+			return
+		}
 	}
 	if err := os.WriteFile(s.path, b, 0o600); err != nil {
 		slog.Error("dynset: failed to save", "err", err)

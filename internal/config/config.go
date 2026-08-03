@@ -40,6 +40,7 @@ type Config struct {
 	BotID    string // BOT_TOKEN before the first ':'
 	Proxy    string
 
+	DynsetPath   string // where dynamic_settings.json lives (must be on a mount)
 	ReportChatID string
 	ErrorChatID  string
 	Admins       []string
@@ -121,6 +122,19 @@ func Load() (*Config, error) {
 		c.BotID = strings.SplitN(c.BotToken, ":", 2)[0]
 	}
 	c.Proxy = opt("PROXY", "")
+
+	// Where runtime-tunable settings (the AI url/session, the donation button) are
+	// persisted. Overridable because in Docker the working directory lives in the
+	// container's throwaway layer: writing there means every redeploy silently
+	// resets whatever an admin configured. Deployments point this at a mounted
+	// path; the default keeps local runs and the staging stack unchanged.
+	// An EMPTY value falls back to the default rather than through: os.WriteFile("")
+	// just errors, so an empty DYNSET_PATH= line in a .env would mean every admin
+	// setting is silently dropped with nothing but a log line to show for it.
+	c.DynsetPath = opt("DYNSET_PATH", "dynamic_settings.json")
+	if strings.TrimSpace(c.DynsetPath) == "" {
+		c.DynsetPath = "dynamic_settings.json"
+	}
 
 	c.ReportChatID = opt("REPORT_CHAT_ID", "")
 	c.ErrorChatID = opt("ERROR_CHAT_ID", "")

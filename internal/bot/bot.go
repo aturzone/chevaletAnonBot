@@ -135,7 +135,7 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 		DB:         database,
 		Cfg:        cfg,
 		Texts:      txt,
-		Dyn:        dynset.New("dynamic_settings.json", cfg.AIURL, cfg.AISessionID, cfg.DonationLink),
+		Dyn:        dynset.New(cfg.DynsetPath, cfg.AIURL, cfg.AISessionID, cfg.DonationLink),
 		Tokens:     tokens,
 		users:      newUserStore(),
 		aiQueue:    newAIQueue(),

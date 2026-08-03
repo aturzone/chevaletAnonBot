@@ -168,3 +168,29 @@ func TestConfigLoadErrors(t *testing.T) {
 		t.Fatalf("Load() with bad int = %v; want a 'must be an integer' error", err)
 	}
 }
+
+// TestDynsetPathDefaultAndOverride pins the persistence path down. It matters
+// more than a normal optional setting: if this silently falls back to the working
+// directory inside a container, every redeploy wipes whatever an admin set with
+// /admin_donate, and nothing looks broken while it happens.
+func TestDynsetPathDefaultAndOverride(t *testing.T) {
+	setRequiredEnv(t)
+
+	t.Setenv("DYNSET_PATH", "")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if c.DynsetPath != "dynamic_settings.json" {
+		t.Errorf("DynsetPath default = %q; want dynamic_settings.json", c.DynsetPath)
+	}
+
+	t.Setenv("DYNSET_PATH", "/app/state/dynamic_settings.json")
+	c, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if c.DynsetPath != "/app/state/dynamic_settings.json" {
+		t.Errorf("DynsetPath = %q; want the mounted override", c.DynsetPath)
+	}
+}
