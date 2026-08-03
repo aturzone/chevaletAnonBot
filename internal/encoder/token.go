@@ -46,6 +46,22 @@ const (
 // use of the same server secret. "v1" allows a future scheme bump.
 const tokenKeyLabel = "chevalet:callback-token:v1"
 
+// tokenEnc is base64url WITHOUT padding, in Strict mode.
+//
+// Strict matters: tokenRawLen (23) bytes encode to 31 base64 chars, which hold
+// 186 bits for 184 bits of payload — so the final character carries 2 bits that
+// are not part of the message. The non-strict decoder silently ignores them, which
+// made every token have FOUR distinct string encodings that all opened to the same
+// uid (…Ku8/…Ku9/…Ku-/…Ku_). Nothing here keys off the token string, so that was
+// malleability rather than an exploitable hole, but non-canonical ciphertext is
+// worth refusing on principle — and it made TestTokenTamperRejected fail ~6% of
+// runs (whenever flipping the last char changed only padding bits), which is a
+// tamper test that silently stops testing tampering.
+//
+// Encoding is unaffected (Go always writes those bits as zero), so every token
+// ever issued still opens — only malleated variants are now rejected.
+var tokenEnc = base64.RawURLEncoding.Strict()
+
 // errNoRand is returned by Seal if the OS CSPRNG fails — the caller must fail the
 // send rather than emit a token with a predictable nonce (which would silently
 // destroy unlinkability).
@@ -126,7 +142,7 @@ func (tc *TokenCipher) Seal(uid int64, aad []byte) (string, error) {
 	raw = append(raw, nonce[:]...)
 	raw = append(raw, ct...)
 	raw = append(raw, tag...)
-	return base64.RawURLEncoding.EncodeToString(raw), nil
+	return tokenEnc.EncodeToString(raw), nil
 }
 
 // Open reverses Seal: returns (uid, true) iff token is a well-formed, key-valid,
@@ -136,7 +152,7 @@ func (tc *TokenCipher) Open(token string, aad []byte) (int64, bool) {
 	if !tc.Ready() {
 		return 0, false
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(token)
+	raw, err := tokenEnc.DecodeString(token)
 	if err != nil || len(raw) != tokenRawLen {
 		return 0, false
 	}
