@@ -103,6 +103,19 @@ handlers outrank the catch-all, which is always last). The three
 in-memory state machines keyed by `KeyStrategySenderAndChat`, ported from the
 Python bot's `ConversationHandler` states.
 
+`/menu` (`internal/bot/menu.go`) is the BotFather-style panel users see: one
+message edited in place, four sections plus an admin-only fifth. Its "my links"
+and "settings" buttons carry the callback data those two conversations already
+accept as **entry points** (`mylinks-menu` / `settings-menu`) rather than
+reimplementing them — so don't "tidy" that data. Every other panel button is
+`menu|`-prefixed, registered *before* the conversations, and deliberately free of
+the substrings their `cqContains` filters match; `menu_test.go` asserts that, so a
+colliding button fails the build instead of silently doing nothing.
+
+Only `/menu` and `/cancel` are in the Telegram command list, but every old
+command (`/help`, `/settings`, `/my_links`, `/donate`, `/privacy`, `/myuid`,
+`/bug`, the admin ones) is still registered and still works.
+
 ### Package layout
 
 ```

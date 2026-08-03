@@ -50,11 +50,19 @@ func (b *Bot) startBackground(ctx context.Context) {
 // list matches the job's, which includes /donate — it superseded the shorter
 // list main.py set at startup.)
 func (b *Bot) setCommands() {
+	// /menu is now the single entry point (it holds links, settings, help and
+	// support), so the list is deliberately short — a five-item command list is
+	// noise once one panel covers all of it.
+	//
+	// Every old command STILL WORKS: /help, /settings, /my_links, /donate,
+	// /privacy, /myuid, /bug and the admin ones are all registered as before. They
+	// are only dropped from this list, not removed, so the ~17k existing users who
+	// type them out of habit are unaffected.
+	//
+	// /cancel stays visible on purpose: a user part-way through sending needs it
+	// reachable without opening a panel first.
 	_, err := b.TG.SetMyCommands([]gotgbot.BotCommand{
-		{Command: "donate", Description: "کمک مالی 🙏"},
-		{Command: "help", Description: "🆘 کمک!"},
-		{Command: "my_links", Description: "🔗 لینک های من"},
-		{Command: "settings", Description: "⚙️ تنظیمات و قابلیت ها"},
+		{Command: "menu", Description: "🏠 منو"},
 		{Command: "cancel", Description: "❌ کنسل کردن هرکاری که داری انجام میدی"},
 	}, nil)
 	if err != nil {
