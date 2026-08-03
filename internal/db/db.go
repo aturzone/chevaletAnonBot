@@ -125,6 +125,26 @@ func (db *DB) MakeTables(ctx context.Context) error {
 			id SERIAL PRIMARY KEY,
 			reported_id VARCHAR(255) NOT NULL)`,
 
+		// report_cases backs the admin actions on a report. The reports table only
+		// ever held a count per reported user, so the pair behind a report existed
+		// nowhere: an admin had to copy the uid out of the channel message by hand.
+		//
+		// It also carries the handling state. That lives in the DB rather than in
+		// the message's buttons because the action buttons are shown in an admin's
+		// PRIVATE chat (channel buttons do not deliver callbacks — see
+		// reportactions.go), so a keyboard can only ever reflect one admin's view.
+		// Two admins opening the same report must not both ban or both count it.
+		`CREATE TABLE IF NOT EXISTS report_cases (
+			report_id VARCHAR(64) PRIMARY KEY,
+			reporter_id VARCHAR(255) NOT NULL,
+			reported_id VARCHAR(255) NOT NULL,
+			channel_chat_id BIGINT,
+			channel_msg_id BIGINT,
+			action VARCHAR(32),
+			handled_by VARCHAR(255),
+			handled_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now())`,
+
 		// Additive migrations for features added after the original Python schema.
 		// Each is idempotent (ADD COLUMN IF NOT EXISTS) and, on PostgreSQL 11+, a
 		// metadata-only change (no table rewrite, no long lock) — so it is safe to

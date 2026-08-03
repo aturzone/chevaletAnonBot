@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
 
+	"github.com/aturzone/chevaletAnonBot/internal/db"
 	"github.com/aturzone/chevaletAnonBot/internal/encoder"
 )
 
@@ -355,21 +357,33 @@ func reportConfirmYes(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) 
 		"reported: " + b.getLinkUsername(targetUID) + "\n" +
 		"\n----------------\n❇️ COPY: <code>" + targetUID + "</code>\n------------\n" +
 		"message:"
-	// Action buttons so an admin can register the report, ban, or write to either
-	// party from the channel instead of copying the uid into /admin commands.
-	// Sealing can only fail if the token cipher has no key, which bot.New already
-	// refuses to start without; on the impossible path, post the report anyway
-	// (losing the buttons) rather than lose the report itself.
-	reporterToken, rerr := b.Tokens.Seal(userID64, nil)
-	reportedToken, derr := b.Tokens.Seal(targetID, nil)
+	// A LINK button, not callback buttons: tapping a callback button on a channel
+	// post never reaches the bot (the client does not even send it — verified
+	// against this very channel), so the actions live in the admin's private chat,
+	// which this link opens. See handleReportCase.
 	headerOpts := &gotgbot.SendMessageOpts{ParseMode: "HTML"}
-	if rerr == nil && derr == nil {
-		kb := reportActionKeyboard(reporterToken, reportedToken)
-		headerOpts.ReplyMarkup = kb
+	if botUser := b.TG.User.Username; botUser != "" {
+		headerOpts.ReplyMarkup = ikb(row(urlBtn(
+			btnHandleReport, "https://t.me/"+botUser+"?start="+reportDeepLinkPrefix+reportID)))
 	}
 	firstMessage, err := tg.SendMessage(reportChatID, header, headerOpts)
 	if err != nil {
 		return err
+	}
+
+	// Record the pair behind the report so the private-chat actions know who to act
+	// on, and remember the channel message so it can be stamped once handled. A
+	// failure here must not lose the report itself, which is already posted — the
+	// admin can still fall back to /admin ban and /admin report add.
+	if cerr := b.DB.AddReportCase(dbctx, db.ReportCase{
+		ReportID:      reportID,
+		ReporterID:    userid,
+		ReportedID:    targetUID,
+		ChannelChatID: reportChatID,
+		ChannelMsgID:  firstMessage.MessageId,
+	}); cerr != nil {
+		slog.Error("could not record the report case; admin buttons will not work for it",
+			"report_id", reportID, "err", cerr)
 	}
 
 	targetMid64, _ := strconv.ParseInt(targetMid, 10, 64)

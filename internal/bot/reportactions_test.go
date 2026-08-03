@@ -70,68 +70,6 @@ func TestReportActionKeyboardShape(t *testing.T) {
 	}
 }
 
-// TestRptMarkDoneReplacesOnlyActionRow proves the "who did it" swap kills the
-// accept/ban row (so two admins cannot both ban) while leaving the two message
-// buttons alive.
-func TestRptMarkDoneReplacesOnlyActionRow(t *testing.T) {
-	kb := reportActionKeyboard("TOKREPORTER", "TOKREPORTED")
-	rows := kb.InlineKeyboard
-
-	newRows := make([][]gotgbot.InlineKeyboardButton, 0, len(rows))
-	for _, r := range rows {
-		if rowHasVerb(r, rptVerbAccept) || rowHasVerb(r, rptVerbBan) {
-			newRows = append(newRows, rptDoneRow("🚫 بن شد — @someadmin"))
-			continue
-		}
-		newRows = append(newRows, r)
-	}
-
-	if len(newRows) != 2 {
-		t.Fatalf("rows after mark-done = %d; want 2", len(newRows))
-	}
-	// The status button must route to the rpt| handler, not the generic
-	// no-callback one: that handler runs under prep, which drops channel updates,
-	// so a tap in the report channel would never be answered.
-	if len(newRows[0]) != 1 || newRows[0][0].CallbackData != "rpt|"+rptVerbDone+"|-" {
-		t.Errorf("action row was not replaced by an answerable status button: %+v", newRows[0])
-	}
-	if !strings.Contains(newRows[0][0].Text, "@someadmin") {
-		t.Errorf("status button %q does not name the admin who acted", newRows[0][0].Text)
-	}
-	// The message buttons must still work afterwards.
-	if len(newRows[1]) != 2 {
-		t.Fatalf("message row buttons = %d; want 2 (still usable)", len(newRows[1]))
-	}
-	for _, btn := range newRows[1] {
-		if strings.HasPrefix(btn.CallbackData, "rpt|"+rptVerbDone+"|") {
-			t.Errorf("message button %q was disabled; it should stay usable", btn.Text)
-		}
-	}
-}
-
-// TestRowHasVerb guards the row matcher against matching a verb that merely
-// appears inside a token (a sealed token is arbitrary base64url text).
-func TestRowHasVerb(t *testing.T) {
-	r := row(cb("x", "rpt|a|TOKEN"), cb("y", "rpt|b|TOKEN"))
-	if !rowHasVerb(r, rptVerbAccept) {
-		t.Error("rowHasVerb(accept) = false; want true")
-	}
-	if !rowHasVerb(r, rptVerbBan) {
-		t.Error("rowHasVerb(ban) = false; want true")
-	}
-	if rowHasVerb(r, rptVerbMsgReporter) {
-		t.Error("rowHasVerb(msg-reporter) = true; want false")
-	}
-	// A token containing the verb letters must not count as that verb.
-	r2 := row(cb("x", "rpt|"+rptVerbMsgReported+"|aXbXmrXmd"))
-	if rowHasVerb(r2, rptVerbAccept) || rowHasVerb(r2, rptVerbBan) {
-		t.Error("a verb-like substring inside the token was matched as a verb")
-	}
-	if !rowHasVerb(r2, rptVerbMsgReported) {
-		t.Error("rowHasVerb did not match the real verb")
-	}
-}
-
 // TestParseComposeRef covers recovering the target from the prompt the admin
 // replies to. This is what makes the compose flow stateless: get it wrong and a
 // reply either goes nowhere or, worse, to the wrong person.
@@ -225,5 +163,63 @@ func TestAdminLabel(t *testing.T) {
 	}
 	if got := adminLabel(gotgbot.User{Id: 7}); got != "7" {
 		t.Errorf("adminLabel with neither = %q; want the id", got)
+	}
+}
+
+// TestParseReportIDFromSummary covers recovering the report code from the summary
+// the admin acts on. Get this wrong and an action is applied without a claim, so
+// two admins could both ban or both count the same report.
+func TestParseReportIDFromSummary(t *testing.T) {
+	// Exactly the shape handleReportCase builds, HTML already stripped by Telegram.
+	const id = "hFdk4Tg3NY3jt9uEnxFUpq"
+	summary := "⚙️ بررسی ریپورت\nکد: " + id + "\n\nریپورت‌کننده: u1 | @a\nریپورت‌شده: u2 | @b"
+	if got := parseReportIDFromSummary(&gotgbot.Message{Text: summary}); got != id {
+		t.Errorf("parseReportIDFromSummary = %q; want %q", got, id)
+	}
+
+	// With the stamp appended after an action, the code must still be found.
+	stamped := summary + "\n\n🚫 بن شد — @atur"
+	if got := parseReportIDFromSummary(&gotgbot.Message{Text: stamped}); got != id {
+		t.Errorf("after stamping, got %q; want %q", got, id)
+	}
+
+	// No code, or no message: empty rather than garbage. An empty id downgrades to
+	// "no claim", which still acts — better than refusing a real moderation action.
+	for _, m := range []*gotgbot.Message{
+		nil,
+		{Text: ""},
+		{Text: "an unrelated message"},
+	} {
+		if got := parseReportIDFromSummary(m); got != "" {
+			t.Errorf("parseReportIDFromSummary(%v) = %q; want empty", m, got)
+		}
+	}
+}
+
+// TestReportDeepLink locks the /start payload: the report channel's link button is
+// the ONLY way into the actions now, so the prefix and the id charset must stay
+// deep-link safe and inside Telegram's 64-char limit.
+func TestReportDeepLink(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		id := encoder.GenerateCID(20)
+		payload := reportDeepLinkPrefix + id
+		if len(payload) > 64 {
+			t.Fatalf("deep-link payload %q is %d chars (>64)", payload, len(payload))
+		}
+		for j := 0; j < len(payload); j++ {
+			c := payload[j]
+			ok := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+				(c >= '0' && c <= '9') || c == '_' || c == '-'
+			if !ok {
+				t.Fatalf("payload %q has character %q, which Telegram rejects in a /start payload", payload, c)
+			}
+		}
+		// startCmd routes on this prefix; it must not collide with the other one.
+		if strings.HasPrefix(payload, "UNBLOCK-") {
+			t.Fatalf("payload %q collides with the UNBLOCK- deep link", payload)
+		}
+		if strings.TrimPrefix(payload, reportDeepLinkPrefix) != id {
+			t.Fatalf("round-trip of %q lost the id", payload)
+		}
 	}
 }
