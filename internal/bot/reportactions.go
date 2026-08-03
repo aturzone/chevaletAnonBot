@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"errors"
 	"html"
 	"log/slog"
 	"strconv"
@@ -8,62 +9,64 @@ import (
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters"
 	msgfilters "github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/message"
+
+	"github.com/aturzone/chevaletAnonBot/internal/db"
 )
 
-// Action buttons under every report posted to REPORT_CHAT_ID.
+// Admin actions on a report: register the report, ban the reported user, or write
+// to either party through the bot.
 //
-// Before this, an admin read the report, copied the uid out of the header, and
-// ran /admin report add … or /admin ban … by hand. These four buttons do the same
-// work in one tap, and add the ability to write to either party through the bot:
+// WHY THESE BUTTONS ARE NOT IN THE REPORT CHANNEL:
+// they were, and they did not work. Tapping a callback button on a channel post
+// never reached the bot — the Telegram client did not even send it (no progress
+// spinner, and zero arrivals in a handler that logs every callback before any
+// check). The identical button in a private chat with the same handler works. So
+// callback buttons are only used where they are proven to work: the channel post
+// carries a LINK button, which needs no callback, and that link opens the admin's
+// private chat where the real buttons live.
 //
-//	[ ✅ register report ] [ 🚫 ban ]
-//	[ ✉️ message reporter ] [ ✉️ message reported ]
-//
-// Three things about the environment shape this code:
-//
-//  1. REPORT_CHAT_ID is a CHANNEL, and prep deliberately drops channel updates
-//     (decorators.py parity), so the callback handler is registered outside prep —
-//     the same exception errMore makes for the error chat.
-//  2. In a channel the callback's From is the admin who tapped, which is what the
-//     admin check and the "who did it" label use. It is checked against ADMINS
-//     server-side; being able to see the channel is not authority to ban.
-//  3. Composing a message cannot happen in the channel (that would show the draft
-//     to everyone), so the bot asks in the admin's private chat instead.
+// A consequence worth knowing: the buttons now live in ONE admin's private chat,
+// so a keyboard cannot represent shared state. "Who handled it" is therefore
+// claimed in the database (db.ClaimReportCase) and stamped onto the channel
+// message, which is both visible to everyone and safe against two admins acting
+// at the same moment.
 const (
+	btnHandleReport   = "⚙️ بررسی این ریپورت"
 	btnRptAccept      = "✅ ثبت ریپورت"
 	btnRptBan         = "🚫 بن کردن"
 	btnRptMsgReporter = "✉️ پیام به ریپورت‌کننده"
 	btnRptMsgReported = "✉️ پیام به ریپورت‌شده"
 )
 
-// Callback verbs. Kept to two characters because callback_data is capped at 64
-// bytes and each carries a 31-char sealed token: "rpt|md|" + 31 = 38.
+// reportDeepLinkPrefix marks a /start payload as "open this report". It mirrors
+// the existing UNBLOCK- prefix convention in start.go. The report id is
+// alphanumeric (encoder.GenerateCID), so the whole payload is deep-link safe and
+// well inside Telegram's 64-character limit.
+const reportDeepLinkPrefix = "RPT-"
+
+// Callback verbs, kept short because callback_data is capped at 64 bytes and each
+// carries the report id plus a sealed uid token.
 const (
 	rptVerbAccept      = "a"
 	rptVerbBan         = "b"
 	rptVerbMsgReporter = "mr"
 	rptVerbMsgReported = "md"
-	// rptVerbDone is the spent accept/ban row. It carries no token and does
-	// nothing, but it must still be answered: the generic no-callback handler runs
-	// under prep, which drops channel updates, so a tap there would leave the
-	// client spinning until it timed out.
-	rptVerbDone = "x"
 )
 
-// composeMarker tags the prompt the bot sends to an admin's private chat. The
-// admin's reply is matched by looking at the message it replies TO, so the pending
-// compose survives a bot restart — there is no in-memory state to lose. The token
-// after the marker is the sealed target uid, so a raw id never appears even here.
+// composeMarker tags the prompt asking an admin for the text to send. The reply is
+// matched against the message it replies TO, so a pending compose survives a
+// restart — there is no in-memory state to lose. The token after it is the sealed
+// target uid, so a raw id never appears even here.
 const composeMarker = "ref:rpt:"
 
-// reportActionKeyboard is attached to the report header message.
+// reportActionKeyboard is shown in the admin's PRIVATE chat after they follow the
+// channel's link button.
 //
-// Sealed tokens rather than raw uids: the header already prints the reported uid
-// for copy/paste, so this is not hiding anything from admins — it keeps the
-// invariant that no real Telegram id is ever put in callback_data, which is what
-// stops an id leaking if a button is ever surfaced somewhere less private.
+// Sealed tokens rather than raw uids, keeping the invariant that no real Telegram
+// id goes into callback_data. A token is 31 chars: "rpt|md|" + 31 = 38 of 64.
 func reportActionKeyboard(reporterToken, reportedToken string) gotgbot.InlineKeyboardMarkup {
 	return ikb(
 		row(
@@ -77,14 +80,7 @@ func reportActionKeyboard(reporterToken, reportedToken string) gotgbot.InlineKey
 	)
 }
 
-// rptDoneRow replaces the accept/ban row once one of them has been used, so a
-// second admin cannot double-ban or double-count the same report, and so the log
-// of who handled it survives in the channel.
-func rptDoneRow(label string) []gotgbot.InlineKeyboardButton {
-	return row(cb(label, "rpt|"+rptVerbDone+"|-"))
-}
-
-// adminLabel is a short human name for the admin who tapped, for the done label.
+// adminLabel is a short human name for the admin who acted.
 func adminLabel(u gotgbot.User) string {
 	if u.Username != "" {
 		return "@" + u.Username
@@ -95,40 +91,101 @@ func adminLabel(u gotgbot.User) string {
 	return strconv.FormatInt(u.Id, 10)
 }
 
-// reportAction handles the four buttons. Registered OUTSIDE prep (channel chat).
+// handleReportCase serves /start RPT-<id>: it shows the report and its action
+// buttons in the admin's private chat. Called from startCmd.
+func (b *Bot) handleReportCase(tg *gotgbot.Bot, ctx *ext.Context, userid, arg string) error {
+	reportID := strings.TrimPrefix(arg, reportDeepLinkPrefix)
+
+	// Non-admins get the ordinary "didn't understand" reply: the link is public
+	// once it is in a channel, so it must not confirm that a report id exists.
+	if !b.isAdmin(userid) {
+		slog.Warn("report case link followed by a non-admin", "actor", userid)
+		if e := b.otherMessagesTemplate(ctx); e != nil {
+			return e
+		}
+		return handlers.EndConversation()
+	}
+
+	dbctx, cancel := b.bg()
+	defer cancel()
+
+	c, err := b.DB.GetReportCase(dbctx, reportID)
+	if errors.Is(err, db.ErrNoReportCase) {
+		if e := b.replyText(ctx, "این ریپورت پیدا نشد. (ممکنه قبل از اضافه شدن این قابلیت ثبت شده باشه)"); e != nil {
+			return e
+		}
+		return handlers.EndConversation()
+	}
+	if err != nil {
+		return err
+	}
+
+	reporterToken, rerr := b.Tokens.Seal(mustInt64(c.ReporterID), nil)
+	reportedToken, derr := b.Tokens.Seal(mustInt64(c.ReportedID), nil)
+	if rerr != nil || derr != nil {
+		return errors.Join(rerr, derr)
+	}
+
+	body := "⚙️ <b>بررسی ریپورت</b>\n" +
+		"کد: <code>" + html.EscapeString(c.ReportID) + "</code>\n\n" +
+		"ریپورت‌کننده: " + b.getLinkUsername(c.ReporterID) + "\n" +
+		"ریپورت‌شده: " + b.getLinkUsername(c.ReportedID)
+	if c.Handled {
+		body += "\n\n✅ این ریپورت قبلا توسط <b>" + html.EscapeString(c.HandledBy) +
+			"</b> بررسی شده (" + html.EscapeString(rptActionLabel(c.Action)) + ")." +
+			"\nهنوز می‌تونی به طرفین پیام بدی."
+	}
+
+	_, err = ctx.EffectiveMessage.Reply(tg, body, &gotgbot.SendMessageOpts{
+		ParseMode:   "HTML",
+		ReplyMarkup: reportActionKeyboard(reporterToken, reportedToken),
+	})
+	if err != nil {
+		return err
+	}
+	return handlers.EndConversation()
+}
+
+// rptActionLabel renders a stored action for humans.
+func rptActionLabel(action string) string {
+	switch action {
+	case "ban":
+		return "بن شد"
+	case "report":
+		return "ریپورت ثبت شد"
+	default:
+		return action
+	}
+}
+
+// mustInt64 parses a uid stored in the DB; 0 on failure, which simply fails to
+// open later rather than acting on the wrong person.
+func mustInt64(s string) int64 {
+	n, _ := strconv.ParseInt(s, 10, 64)
+	return n
+}
+
+// reportAction handles the four buttons. Registered outside prep so it also works
+// if a report is ever surfaced somewhere prep filters out; it does its own admin
+// check either way.
 func (b *Bot) reportAction(tg *gotgbot.Bot, ctx *ext.Context) error {
 	clbk := ctx.CallbackQuery
 	if clbk == nil || clbk.Data == "" {
 		return nil
 	}
-	msg := ctx.EffectiveMessage
 	actor := strconv.FormatInt(clbk.From.Id, 10)
 
-	// Every one of the guards below used to return silently, which made a
-	// non-working button impossible to tell apart from a button whose update never
-	// arrived. Each refusal now says why, and each action is logged: this doubles
-	// as the audit trail for who banned whom, which an admin path deserves anyway.
-	chatID := int64(0)
-	if msg != nil {
-		chatID = msg.Chat.Id
-	}
-	slog.Info("report action received",
-		"chat", chatID, "want_chat", b.Cfg.ReportChatID,
-		"actor", actor, "admin", b.isAdmin(actor), "data", clbk.Data)
-
-	// Only ever act inside the configured report chat.
-	if msg == nil || b.Cfg.ReportChatID == "" ||
-		strconv.FormatInt(msg.Chat.Id, 10) != b.Cfg.ReportChatID {
-		slog.Warn("report action refused: wrong chat",
-			"chat", chatID, "want_chat", b.Cfg.ReportChatID, "msg_nil", msg == nil)
-		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "این دکمه فقط داخل کانال ریپورت کار می‌کنه.",
-			ShowAlert: true,
-		})
+	fields := strings.SplitN(clbk.Data, "|", 3)
+	if len(fields) != 3 {
+		slog.Warn("report action refused: malformed data", "data", clbk.Data)
+		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: "دکمه ناشناس.", ShowAlert: true})
 		return nil
 	}
+	verb, token := fields[1], fields[2]
+	slog.Info("report action received", "actor", actor, "admin", b.isAdmin(actor), "verb", verb)
 
-	// Authority comes from ADMINS, not from channel membership.
+	// Authority is ADMINS, checked server-side on every tap: the deep link is
+	// public once it sits in a channel, and buttons outlive admin-list changes.
 	if !b.isAdmin(actor) {
 		slog.Warn("report action refused: not an admin", "actor", actor)
 		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
@@ -138,29 +195,9 @@ func (b *Bot) reportAction(tg *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	fields := strings.SplitN(clbk.Data, "|", 3)
-	if len(fields) != 3 {
-		slog.Warn("report action refused: malformed data", "data", clbk.Data)
-		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "دکمه ناشناس.",
-			ShowAlert: true,
-		})
-		return nil
-	}
-	verb, token := fields[1], fields[2]
-
-	// The spent status button: acknowledge and stop, before any token handling —
-	// it deliberately carries no token.
-	if verb == rptVerbDone {
-		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
-			Text: "این ریپورت قبلا بررسی شده.",
-		})
-		return nil
-	}
-
 	uid, ok := b.Tokens.Open(token, nil)
 	if !ok {
-		slog.Warn("report action refused: token did not open", "verb", verb, "token_len", len(token))
+		slog.Warn("report action refused: token did not open", "verb", verb)
 		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
 			Text:      "این دکمه دیگه معتبر نیست.",
 			ShowAlert: true,
@@ -168,13 +205,16 @@ func (b *Bot) reportAction(tg *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 	uidStr := strconv.FormatInt(uid, 10)
-	slog.Info("report action dispatch", "verb", verb, "actor", actor, "target", uidStr)
+
+	// The report id is in the message this keyboard is attached to, which is the
+	// summary handleReportCase sent.
+	reportID := parseReportIDFromSummary(ctx.EffectiveMessage)
 
 	switch verb {
 	case rptVerbAccept:
-		return b.rptAccept(tg, ctx, clbk, uidStr)
+		return b.rptAccept(tg, ctx, clbk, reportID, uidStr)
 	case rptVerbBan:
-		return b.rptBan(tg, ctx, clbk, uidStr)
+		return b.rptBan(tg, ctx, clbk, reportID, uidStr)
 	case rptVerbMsgReporter:
 		return b.rptAskCompose(tg, clbk, token, "reporter")
 	case rptVerbMsgReported:
@@ -186,9 +226,60 @@ func (b *Bot) reportAction(tg *gotgbot.Bot, ctx *ext.Context) error {
 	}
 }
 
-// rptAccept records one report against the reported user, exactly as
+// parseReportIDFromSummary pulls the report code out of the summary message.
+// Empty when it cannot be found, which downgrades the action to "no claim" rather
+// than refusing it — acting is more useful than a perfect audit trail.
+func parseReportIDFromSummary(msg *gotgbot.Message) string {
+	if msg == nil {
+		return ""
+	}
+	const marker = "کد: "
+	i := strings.Index(msg.Text, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := msg.Text[i+len(marker):]
+	end := len(rest)
+	for j := 0; j < len(rest); j++ {
+		c := rest[j]
+		alnum := (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+		if !alnum {
+			end = j
+			break
+		}
+	}
+	return rest[:end]
+}
+
+// claim takes the case for this admin, or explains who already has it.
+func (b *Bot) claim(tg *gotgbot.Bot, clbk *gotgbot.CallbackQuery, reportID, action string) bool {
+	if reportID == "" {
+		return true // no case to claim; let the action through
+	}
+	dbctx, cancel := b.bg()
+	defer cancel()
+
+	won, holder, held, err := b.DB.ClaimReportCase(dbctx, reportID, action, adminLabel(clbk.From))
+	if err != nil {
+		slog.Warn("could not claim report case; allowing the action", "report_id", reportID, "err", err)
+		return true
+	}
+	if !won {
+		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
+			Text:      "این ریپورت قبلا توسط " + holder + " بررسی شده (" + rptActionLabel(held) + ").",
+			ShowAlert: true,
+		})
+		return false
+	}
+	return true
+}
+
+// rptAccept records one report against the reported user, as
 // `/admin report add <uid>` did by hand, and reports the new total.
-func (b *Bot) rptAccept(tg *gotgbot.Bot, ctx *ext.Context, clbk *gotgbot.CallbackQuery, uid string) error {
+func (b *Bot) rptAccept(tg *gotgbot.Bot, ctx *ext.Context, clbk *gotgbot.CallbackQuery, reportID, uid string) error {
+	if !b.claim(tg, clbk, reportID, "report") {
+		return nil
+	}
 	dbctx, cancel := b.bg()
 	defer cancel()
 
@@ -196,90 +287,76 @@ func (b *Bot) rptAccept(tg *gotgbot.Bot, ctx *ext.Context, clbk *gotgbot.Callbac
 	if err != nil {
 		return err
 	}
-	slog.Info("report registered by admin", "target", uid, "total", count,
-		"actor", strconv.FormatInt(clbk.From.Id, 10))
+	slog.Info("report registered by admin", "target", uid, "total", count, "actor", clbk.From.Id)
 	_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
 		Text:      "ثبت شد. تعداد ریپورت‌های این کاربر: " + strconv.Itoa(count),
 		ShowAlert: true,
 	})
-	b.rptMarkDone(tg, ctx, "✅ ثبت شد ("+strconv.Itoa(count)+") — "+adminLabel(clbk.From))
+	b.rptStamp(tg, ctx, reportID, "✅ ثبت شد ("+strconv.Itoa(count)+") — "+adminLabel(clbk.From))
 	return nil
 }
 
-// rptBan bans the reported user and tells them, which is the one notification the
-// bot sends here: they would discover it anyway the moment the bot stops
-// answering, so saying it plainly is clearer than going silent. Accepting a report
-// stays silent on purpose — a warning mostly invites a fresh account.
-func (b *Bot) rptBan(tg *gotgbot.Bot, ctx *ext.Context, clbk *gotgbot.CallbackQuery, uid string) error {
+// rptBan bans the reported user and tells them — the one notification sent here,
+// since they discover it anyway when the bot stops answering. A merely-registered
+// report stays silent, because warning someone mostly invites a fresh account.
+func (b *Bot) rptBan(tg *gotgbot.Bot, ctx *ext.Context, clbk *gotgbot.CallbackQuery, reportID, uid string) error {
+	if !b.claim(tg, clbk, reportID, "ban") {
+		return nil
+	}
 	dbctx, cancel := b.bg()
 	defer cancel()
 
 	if err := b.DB.BanAction(dbctx, uid, true); err != nil {
 		return err
 	}
-	slog.Info("user banned by admin from report", "target", uid,
-		"actor", strconv.FormatInt(clbk.From.Id, 10))
-	_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
-		Text:      "کاربر بن شد.",
-		ShowAlert: true,
-	})
+	slog.Info("user banned by admin from report", "target", uid, "actor", clbk.From.Id)
+	_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: "کاربر بن شد.", ShowAlert: true})
 
-	// Best effort: a user who never started the bot, or who blocked it, cannot be
-	// told — that must not fail the ban, which is already committed.
+	// Best effort: a user who never started the bot, or blocked it, cannot be told
+	// — that must not fail a ban which is already committed.
 	if uid64, perr := strconv.ParseInt(uid, 10, 64); perr == nil {
 		_, _ = tg.SendMessage(uid64, txtBannedNotice, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
 	}
-	b.rptMarkDone(tg, ctx, "🚫 بن شد — "+adminLabel(clbk.From))
+	b.rptStamp(tg, ctx, reportID, "🚫 بن شد — "+adminLabel(clbk.From))
 	return nil
 }
 
-// rptMarkDone swaps the accept/ban row for a dead status button, leaving the two
-// message buttons usable (writing to either party still makes sense afterwards).
-func (b *Bot) rptMarkDone(tg *gotgbot.Bot, ctx *ext.Context, label string) {
-	msg := ctx.EffectiveMessage
-	if msg == nil || msg.ReplyMarkup == nil {
-		// The action itself already succeeded; only the visual stamp is lost. Worth
-		// a line, because "the button did not change" is exactly how a user reports
-		// this and it would otherwise look like nothing happened at all.
-		slog.Warn("report action: cannot stamp the keyboard",
-			"msg_nil", msg == nil, "markup_nil", msg == nil || msg.ReplyMarkup == nil)
+// rptStamp records the outcome in two places: a line under the admin's own
+// summary, and the ORIGINAL channel message, so everyone watching the report
+// channel sees it was handled and by whom without needing the buttons to work
+// there.
+func (b *Bot) rptStamp(tg *gotgbot.Bot, ctx *ext.Context, reportID, label string) {
+	if msg := ctx.EffectiveMessage; msg != nil {
+		if _, _, err := msg.EditText(tg, msg.Text+"\n\n"+label, &gotgbot.EditMessageTextOpts{
+			ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: msg.ReplyMarkup.InlineKeyboard},
+		}); err != nil {
+			slog.Warn("could not stamp the admin's summary", "err", err)
+		}
+	}
+	if reportID == "" {
 		return
 	}
-	rows := msg.ReplyMarkup.InlineKeyboard
-	newRows := make([][]gotgbot.InlineKeyboardButton, 0, len(rows))
-	for _, r := range rows {
-		if rowHasVerb(r, rptVerbAccept) || rowHasVerb(r, rptVerbBan) {
-			newRows = append(newRows, rptDoneRow(label))
-			continue
-		}
-		newRows = append(newRows, r)
+	dbctx, cancel := b.bg()
+	defer cancel()
+	c, err := b.DB.GetReportCase(dbctx, reportID)
+	if err != nil || c.ChannelChatID == 0 || c.ChannelMsgID == 0 {
+		return
 	}
-	// The action already succeeded, so a failure here is not fatal — but it is
-	// logged rather than dropped, because in a channel this is where a missing
-	// "can edit messages" permission would show up.
-	if _, _, err := msg.EditReplyMarkup(tg, &gotgbot.EditMessageReplyMarkupOpts{
-		ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: newRows},
+	// Replace the channel's link button with the outcome. Editing (not deleting)
+	// keeps the report itself readable as a record.
+	if _, _, err := tg.EditMessageReplyMarkup(&gotgbot.EditMessageReplyMarkupOpts{
+		ChatId:      c.ChannelChatID,
+		MessageId:   c.ChannelMsgID,
+		ReplyMarkup: ikb(row(cb(label, "rpt|done|-"))),
 	}); err != nil {
-		slog.Warn("report action: editing the keyboard failed", "err", err)
+		slog.Warn("could not stamp the report channel message",
+			"chat", c.ChannelChatID, "msg", c.ChannelMsgID, "err", err)
 	}
-}
-
-// rowHasVerb reports whether a keyboard row carries one of the rpt verbs.
-func rowHasVerb(r []gotgbot.InlineKeyboardButton, verb string) bool {
-	for _, btn := range r {
-		if strings.HasPrefix(btn.CallbackData, "rpt|"+verb+"|") {
-			return true
-		}
-	}
-	return false
 }
 
 // rptAskCompose asks the admin, in their own private chat, for the text to send.
-//
-// It has to be private: a draft typed into the report channel would be visible to
-// everyone there. The prompt carries the sealed target uid, and the admin's reply
-// is matched against the prompt, so nothing needs to be remembered in memory and
-// a restart mid-compose is harmless.
+// The prompt carries the sealed target uid and the reply is matched against the
+// prompt, so nothing is held in memory and a restart mid-compose is harmless.
 func (b *Bot) rptAskCompose(tg *gotgbot.Bot, clbk *gotgbot.CallbackQuery, token, role string) error {
 	who := "ریپورت‌کننده"
 	if role == "reported" {
@@ -291,29 +368,23 @@ func (b *Bot) rptAskCompose(tg *gotgbot.Bot, clbk *gotgbot.CallbackQuery, token,
 		"برای انصراف /cancel رو بفرست.\n\n" +
 		"<code>" + composeMarker + role + ":" + token + "</code>"
 
-	_, err := tg.SendMessage(clbk.From.Id, prompt, &gotgbot.SendMessageOpts{
+	if _, err := tg.SendMessage(clbk.From.Id, prompt, &gotgbot.SendMessageOpts{
 		ParseMode:   "HTML",
 		ReplyMarkup: gotgbot.ForceReply{ForceReply: true, InputFieldPlaceholder: "متن پیام…"},
-	})
-	if err != nil {
-		// Almost always "bot can't initiate conversation with a user": the admin
-		// has never opened a private chat with the bot.
+	}); err != nil {
 		_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
 			Text:      "نشد برات پیام خصوصی بفرستم. اول یه /start به بات بده بعد دوباره امتحان کن.",
 			ShowAlert: true,
 		})
 		return nil
 	}
-	_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{
-		Text:      "توی چت خصوصی بات، متن پیام رو بنویس.",
-		ShowAlert: true,
-	})
+	_, _ = clbk.Answer(tg, &gotgbot.AnswerCallbackQueryOpts{Text: "متن پیام رو بنویس ⤴️"})
 	return nil
 }
 
 // rptComposeFilter matches an admin's reply to a compose prompt: a private text
-// message replying to a bot message that carries the marker. Narrow on purpose —
-// it is registered ahead of the conversations, so it must not match anything else.
+// message replying to a bot message carrying the marker. Narrow on purpose — it is
+// registered ahead of the conversations, so it must match nothing else.
 func (b *Bot) rptComposeFilter(botID int64) filters.Message {
 	return func(m *gotgbot.Message) bool {
 		return m.Chat.Type == "private" &&
@@ -331,7 +402,7 @@ func rptComposeReply(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) e
 	if msg == nil || msg.ReplyToMessage == nil {
 		return nil
 	}
-	// Re-check authority: the prompt is old and the admin list may have changed.
+	// Re-check authority: the prompt may be old and the admin list may have changed.
 	if !b.isAdmin(userid) {
 		return nil
 	}
@@ -350,10 +421,11 @@ func rptComposeReply(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) e
 
 	body := "📩 <b>پیام از طرف پشتیبانی</b>\n\n" + html.EscapeString(msg.Text)
 	if _, err := tg.SendMessage(uid, body, &gotgbot.SendMessageOpts{ParseMode: "HTML"}); err != nil {
-		// A user who blocked the bot or never started it is an expected outcome
-		// here, not a bug worth an error report.
+		// A user who blocked the bot or never started it is expected here, not a bug.
+		slog.Info("admin message to a report party could not be delivered", "err", err)
 		return b.replyText(ctx, "نشد پیام رو بفرستم — احتمالا کاربر بات رو بلاک کرده یا هیچوقت استارت نزده.")
 	}
+	slog.Info("admin messaged a report party", "role", role, "actor", userid)
 
 	who := "ریپورت‌کننده"
 	if role == "reported" {
@@ -365,11 +437,10 @@ func rptComposeReply(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) e
 // parseComposeRef pulls the role and sealed token back out of a prompt.
 //
 // The token is cut at the first character that cannot appear in base64url rather
-// than at whitespace. Telegram strips HTML from Message.Text (the tags arrive as
-// entities), so in practice the marker ends the text cleanly — but if that ever
+// than at whitespace. Telegram strips HTML from Message.Text (tags arrive as
+// entities), so the marker ends the text cleanly in practice — but if that ever
 // stopped holding, a trailing "</code>" would ride along inside the token, Open
-// would fail, and the compose flow would break silently. Cutting on the charset
-// makes the parser independent of that assumption.
+// would fail, and the compose flow would break silently.
 func parseComposeRef(promptText string) (role, token string, ok bool) {
 	i := strings.Index(promptText, composeMarker)
 	if i < 0 {

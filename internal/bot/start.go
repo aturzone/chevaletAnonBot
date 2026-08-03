@@ -35,6 +35,11 @@ func startCmd(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) error {
 	if strings.HasPrefix(arg, "UNBLOCK-") {
 		return b.startUnblock(tg, ctx, userid, arg)
 	}
+	// The report channel's "handle this report" link lands here. Checked before
+	// startConnect so a report id is never mistaken for someone's anonymous cid.
+	if strings.HasPrefix(arg, reportDeepLinkPrefix) {
+		return b.handleReportCase(tg, ctx, userid, arg)
+	}
 	return b.startConnect(tg, ctx, userid, arg)
 }
 
