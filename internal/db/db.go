@@ -156,6 +156,31 @@ func (db *DB) MakeTables(ctx context.Context) error {
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS anon_name VARCHAR(255)`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS anon_emoji VARCHAR(255)`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS anon_enabled BOOLEAN NOT NULL DEFAULT FALSE`,
+
+		// Columns backing the daily admin stats (/admin_stats).
+		//
+		// NOTE THE MISSING DEFAULT on created_at, and that it is added in two steps.
+		// Adding it WITH `DEFAULT now()` would stamp every one of the ~17k existing
+		// rows with the migration time, and the first stats report would claim they
+		// all joined today. Added bare, existing rows get NULL — honestly "joined
+		// before tracking started" — and the default is then set so only NEW users
+		// are stamped.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ`,
+		`ALTER TABLE users ALTER COLUMN created_at SET DEFAULT now()`,
+
+		// last_active_at powers "active users today". It records only THAT a user
+		// used the bot, never who they talked to — the anonymity model forbids
+		// storing the pairing, and nothing here does.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ`,
+		`CREATE INDEX IF NOT EXISTS users_last_active_at_idx ON users (last_active_at)`,
+		`CREATE INDEX IF NOT EXISTS users_created_at_idx ON users (created_at)`,
+
+		// daily_metrics is a pure per-day COUNTER. Deliberately not a message log:
+		// counting deliveries needs no sender, no recipient and no content, so the
+		// bot can report volume without recording who messaged whom.
+		`CREATE TABLE IF NOT EXISTS daily_metrics (
+			day DATE PRIMARY KEY,
+			messages BIGINT NOT NULL DEFAULT 0)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.pool.Exec(ctx, s); err != nil {

@@ -27,6 +27,9 @@
 <code>/admin ai-session set SESSION_ID</code>: set new AI session ID
 <code>/admin ai-session reset</code>: reset AI session ID to config default
 🔸---------------
+<code>/admin_reports</code>: reported users as buttons — open one to unban / ban / clear its reports / message it
+<code>/admin_stats</code>: daily active users, new users, messages + a 7-day trend
+🔸---------------
 <code>/admin_donate</code>: show the donation button state and link
 <code>/admin_donate active</code>: show the donation button under messages
 <code>/admin_donate deactive</code>: hide it (default)

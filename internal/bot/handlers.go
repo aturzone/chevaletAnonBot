@@ -64,6 +64,12 @@ func (b *Bot) registerHandlers() {
 	b.command("donate", cmdDonate)
 	b.command("admin", adminCmd)
 	b.command("admin_donate", adminDonateCmd)
+	b.command("admin_reports", adminReportsCmd)
+	b.command("admin_stats", adminStatsCmd)
+
+	// The moderation panel's buttons. Outside prep like the other admin callback
+	// paths, and admin-checked inside the handler.
+	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("am|"), b.adminMod))
 	b.command("myuid", cmdMyUID)
 	b.command("bug", cmdBug)
 
