@@ -355,7 +355,19 @@ func reportConfirmYes(b *Bot, tg *gotgbot.Bot, ctx *ext.Context, userid string) 
 		"reported: " + b.getLinkUsername(targetUID) + "\n" +
 		"\n----------------\n❇️ COPY: <code>" + targetUID + "</code>\n------------\n" +
 		"message:"
-	firstMessage, err := tg.SendMessage(reportChatID, header, &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+	// Action buttons so an admin can register the report, ban, or write to either
+	// party from the channel instead of copying the uid into /admin commands.
+	// Sealing can only fail if the token cipher has no key, which bot.New already
+	// refuses to start without; on the impossible path, post the report anyway
+	// (losing the buttons) rather than lose the report itself.
+	reporterToken, rerr := b.Tokens.Seal(userID64, nil)
+	reportedToken, derr := b.Tokens.Seal(targetID, nil)
+	headerOpts := &gotgbot.SendMessageOpts{ParseMode: "HTML"}
+	if rerr == nil && derr == nil {
+		kb := reportActionKeyboard(reporterToken, reportedToken)
+		headerOpts.ReplyMarkup = kb
+	}
+	firstMessage, err := tg.SendMessage(reportChatID, header, headerOpts)
 	if err != nil {
 		return err
 	}

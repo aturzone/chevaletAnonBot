@@ -30,6 +30,15 @@ func (b *Bot) registerHandlers() {
 	// the conversation so it is never shadowed.
 	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("errmore|"), b.errMore))
 
+	// report action buttons — the accept/ban/message buttons under reports in
+	// REPORT_CHAT_ID. Also OUTSIDE prep: that chat is a channel, which prep drops.
+	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("rpt|"), b.reportAction))
+
+	// An admin's reply to a "write the message" prompt, in their own private chat.
+	// Ahead of the conversations so the reply is not consumed as an anonymous
+	// message; the filter only matches replies to the bot's own prompt.
+	d.AddHandler(handlers.NewMessage(b.rptComposeFilter(botIDInt(b.Cfg.BotID)), b.topLevel(rptComposeReply)))
+
 	// no_callback_handler — answers the spacer / "sent with link" buttons.
 	d.AddHandler(handlers.NewCallback(cqfilters.Prefix("no-callback"), b.topLevel(noCallback)))
 
