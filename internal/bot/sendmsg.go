@@ -72,17 +72,28 @@ func (b *Bot) sendMsgCore(ctx *ext.Context, userid string) (string, error) {
 	msg := ctx.EffectiveMessage
 	ud := b.ud(ctx)
 
-	// Outbound rate limit (generous): caps an automated anonymous-message flood
-	// without affecting a human composing messages. The send is dropped and the
-	// user is told to slow down; END the compose (no partial send).
-	if !ud.allowSend() {
-		slog.Info("send dropped: rate-limited", "userid", userid, "kind", kindOf(msg))
-		_ = b.replyText(ctx, txtTooFast)
+	targetUID := ud.d.targetUID
+
+	// Anti-spam, checked before anything is sent. Two limits: total output from this
+	// account, and how much a SINGLE recipient can be made to receive — the second
+	// is the one that protects a victim, since the harassment anonymity enables is
+	// aimed at one inbox.
+	//
+	// warn is rate-limited separately: replying to every blocked attempt would cost
+	// one API call per attempt, turning the anti-spam measure into its own flood.
+	// When it is false the attempt is dropped silently, which is also the right
+	// answer for an automated flooder — it gets nothing back to react to.
+	allowed, warn := ud.allowSendTo(targetUID)
+	if !allowed {
+		slog.Info("send dropped: rate-limited",
+			"userid", userid, "kind", kindOf(msg), "warned", warn)
+		if warn {
+			_ = b.replyText(ctx, txtTooFast)
+		}
 		ud.clear()
 		return delNone, nil
 	}
 
-	targetUID := ud.d.targetUID
 	targetCid := ud.d.targetCid
 	targetMid := ud.d.replyTo
 	wasChannelReply := ud.d.channelReply
