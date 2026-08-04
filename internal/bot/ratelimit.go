@@ -275,6 +275,9 @@ type limitedClient struct {
 	limiter *sendLimiter
 	// onFlood is called when Telegram returns a 429, so the bot can report it.
 	onFlood func(retryAfter int64)
+	// onRetryable is called when a send fails for a reason that may succeed later,
+	// so the bot can queue it durably instead of losing it. See outbox.go.
+	onRetryable func(method string, params map[string]any)
 }
 
 var _ gotgbot.BotClient = (*limitedClient)(nil)
@@ -297,6 +300,10 @@ func (c *limitedClient) RequestWithContext(
 	// as a 429 — see errFloodPaused.
 	if fw := c.limiter.floodWaitRemaining(); fw > 0 {
 		if fw > maxInlineWait {
+			// Queue it rather than lose it: the pause may outlast this update.
+			if c.onRetryable != nil {
+				c.onRetryable(method, params)
+			}
 			return nil, errFloodPaused
 		}
 		if err := c.limiter.sleep(ctx, fw); err != nil {
@@ -339,6 +346,9 @@ func (c *limitedClient) RequestWithContext(
 				return c.inner.RequestWithContext(ctx, token, method, params, opts)
 			}
 		}
+	}
+	if c.onRetryable != nil && retryableSendFailure(err) {
+		c.onRetryable(method, params)
 	}
 	return raw, err
 }

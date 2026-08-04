@@ -182,6 +182,21 @@ func (db *DB) MakeTables(ctx context.Context) error {
 		// get it, or every /menu would have to send an extra message to carry it.
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS menu_bar_sent BOOLEAN NOT NULL DEFAULT FALSE`,
 
+		// outbox holds sends that FAILED for a reason that may succeed later (a
+		// Telegram rate limit, a network blip, a restart mid-send). Before it, such a
+		// send was simply lost. See internal/db/outbox.go — a row exists only while a
+		// delivery is outstanding and is deleted on success, so this is deliberately
+		// not a record of who messaged whom.
+		`CREATE TABLE IF NOT EXISTS outbox (
+			id BIGSERIAL PRIMARY KEY,
+			chat_id BIGINT NOT NULL,
+			method VARCHAR(64) NOT NULL,
+			params JSONB NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0,
+			next_try TIMESTAMPTZ NOT NULL DEFAULT now(),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now())`,
+		`CREATE INDEX IF NOT EXISTS outbox_next_try_idx ON outbox (next_try)`,
+
 		// daily_metrics is a pure per-day COUNTER. Deliberately not a message log:
 		// counting deliveries needs no sender, no recipient and no content, so the
 		// bot can report volume without recording who messaged whom.

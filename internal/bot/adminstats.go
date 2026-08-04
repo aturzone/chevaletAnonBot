@@ -39,7 +39,13 @@ func adminStatsCmd(b *Bot, _ *gotgbot.Bot, ctx *ext.Context, userid string) erro
 	if err != nil {
 		return err
 	}
-	return b.replyHTML(ctx, formatStats(s), true)
+	out := formatStats(s)
+	// Queue health, appended here rather than in formatStats so that stays a pure
+	// function of db.Stats. A depth that grows means deliveries are not draining.
+	if q := b.outboxStatus(); q != "" {
+		out += "\n\n" + q
+	}
+	return b.replyHTML(ctx, out, true)
 }
 
 // formatStats renders the dashboard. Kept separate from the command so the layout
