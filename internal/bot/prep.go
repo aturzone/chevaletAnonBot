@@ -129,6 +129,15 @@ func (b *Bot) handleErr(tg *gotgbot.Bot, ctx *ext.Context, err error) error {
 		return nil
 	case errForbidden(err): // covers "bot was blocked by the user" / "not a member"
 		return nil
+	case errors.Is(err, errFloodPaused):
+		// OUR pause, honouring Telegram's. Must NOT call noteFloodWait: recording a
+		// pause because we are already paused is the loop that muted the bot.
+		slog.Warn("send skipped: honouring a Telegram flood wait")
+		if ctx.EffectiveMessage != nil {
+			_, _ = ctx.EffectiveMessage.Reply(tg, txtTooManyRequests, nil)
+		}
+		return nil
+
 	case floodSeconds(err) > 0 || isFloodErr(err):
 		// A Telegram 429 is load, not a bug. Filing it as an incident was actively
 		// harmful: each incident posts to ERROR_CHAT_ID and replies a tracking code,

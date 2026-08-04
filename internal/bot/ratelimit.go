@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"strconv"
 	"sync"
@@ -29,10 +30,15 @@ import (
 // ordering), so a blocking send stalls ALL update processing. Waiting a full second
 // on a per-chat limit would throttle the whole bot to one update per second.
 //
-// So waits are bounded: a call waits at most maxInlineWait, which smooths bursts —
-// the common case — without ever parking the pipeline. Past that the call fails
-// fast, handleErr tells that one user to retry, and everyone else keeps moving.
-// Slowing one sender beats stalling the bot.
+// So pacing is a bounded DELAY, never a rejection: a call waits at most
+// maxInlineWait — which smooths bursts, the common case — and then sends anyway.
+// Dropping somebody's message to protect a rate limit is worse than occasionally
+// taking a 429 that is already handled.
+//
+// The only outright refusal is while Telegram itself has us paused, since the call
+// would be rejected regardless. That is errFloodPaused, NOT a 429 — keep the two
+// distinct, or handleErr records a pause because we are already paused and the bot
+// mutes itself.
 const (
 	// Global ceiling, kept under Telegram's ~30/s with room for the API calls that
 	// are not sends (answerCallbackQuery, edits).
@@ -48,9 +54,20 @@ const (
 	groupRatePerMin = 20.0
 	groupBurst      = 4
 
-	// The longest a single call will wait for a token. Bounded because of
-	// MaxRoutines=1 above.
-	maxInlineWait = 3 * time.Second
+	// The longest a single call will wait for a token — deliberately SHORT.
+	//
+	// This is the number that decides whether one spammer can freeze the bot. The
+	// dispatcher is serial (MaxRoutines=1), so every millisecond spent waiting here
+	// is a millisecond nobody else's update is being processed. At 3s, a user
+	// pushing their 40-per-minute allowance could park the pipeline for a minute at
+	// a time and the bot looked dead to everyone else — which is exactly what was
+	// reported.
+	//
+	// 300ms still smooths the micro-bursts that cause most 429s (a handful of sends
+	// landing in the same instant) while keeping the worst case per update small
+	// enough that a flood cannot starve other users. Beyond it the call sends
+	// anyway and an occasional real 429 is handled, which is the better trade.
+	maxInlineWait = 300 * time.Millisecond
 
 	// A 429 shorter than this is slept through and retried once, since a two-second
 	// pause is cheaper than failing the user's message. Longer waits are reported
@@ -199,9 +216,9 @@ func (l *sendLimiter) reserve(chatID int64) time.Duration {
 		}
 	}
 
-	if fw := l.floodUntil.Sub(now); fw > wait {
-		wait = fw
-	}
+	// The flood pause is deliberately NOT folded in here; the client checks it
+	// separately. Mixing it into the pacing wait is what let one pause become a
+	// self-sustaining lockup.
 	return wait
 }
 
@@ -246,6 +263,12 @@ var unlimitedMethods = map[string]bool{
 	"close":               true,
 }
 
+// errFloodPaused means Telegram has told us to wait and we are honouring it. It is
+// deliberately NOT a TelegramError with code 429: handleErr must be able to tell our
+// own back-pressure apart from Telegram's, or recording a pause in response to our
+// own pause becomes a loop that mutes the bot.
+var errFloodPaused = errors.New("bot: sending paused by a Telegram flood wait")
+
 // limitedClient wraps a gotgbot BotClient with the limiter.
 type limitedClient struct {
 	inner   gotgbot.BotClient
@@ -269,15 +292,29 @@ func (c *limitedClient) RequestWithContext(
 		return c.inner.RequestWithContext(ctx, token, method, params, opts)
 	}
 
+	// A real, Telegram-imposed pause is the only reason to refuse outright: the call
+	// WILL be rejected, so sending is pointless. Reported as its own sentinel, never
+	// as a 429 — see errFloodPaused.
+	if fw := c.limiter.floodWaitRemaining(); fw > 0 {
+		if fw > maxInlineWait {
+			return nil, errFloodPaused
+		}
+		if err := c.limiter.sleep(ctx, fw); err != nil {
+			return nil, err
+		}
+	}
+
+	// Pacing is a bounded DELAY, never a rejection. Waiting the cap and then sending
+	// anyway is the important choice: dropping somebody's message to protect a rate
+	// limit is worse than occasionally taking a 429 that is already handled.
+	//
+	// An earlier version returned a synthetic 429 here instead. handleErr could not
+	// tell it from Telegram's own, so back-pressure recorded a flood pause, the pause
+	// pushed every later call past the cap, and each of those extended it again — a
+	// loop that silently muted the bot, answers included.
 	if wait := c.limiter.reserve(chatIDFromParams(params)); wait > 0 {
 		if wait > maxInlineWait {
-			// Fail fast rather than park the single dispatch goroutine. Presented to
-			// the user as "busy, try again" by handleErr.
-			return nil, &gotgbot.TelegramError{
-				Method:      method,
-				Code:        429,
-				Description: "Too Many Requests: retry after " + strconv.FormatInt(int64(wait.Seconds())+1, 10),
-			}
+			wait = maxInlineWait
 		}
 		if err := c.limiter.sleep(ctx, wait); err != nil {
 			return nil, err
