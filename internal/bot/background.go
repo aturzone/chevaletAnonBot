@@ -36,6 +36,9 @@ func (b *Bot) startBackground(ctx context.Context) {
 	}
 	b.goBG(func() { b.checkConnectionLoop(ctx) })
 	b.goBG(func() { b.userStoreSweepLoop(ctx) })
+	// Drains the durable send outbox: sends that failed for a retryable reason are
+	// re-attempted here instead of being lost. See outbox.go.
+	b.goBG(func() { b.outboxLoop(ctx) })
 	if b.Cfg.SendGMGN {
 		b.goBG(func() { b.gmgnLoop(ctx, b.Cfg.GMTime, true) })  // morning
 		b.goBG(func() { b.gmgnLoop(ctx, b.Cfg.GNTime, false) }) // night

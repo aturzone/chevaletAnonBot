@@ -135,7 +135,8 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 	if base == nil {
 		base = &gotgbot.BaseBotClient{DefaultRequestOpts: botOpts.RequestOpts}
 	}
-	botOpts.BotClient = &limitedClient{inner: base, limiter: limiter}
+	lc := &limitedClient{inner: base, limiter: limiter}
+	botOpts.BotClient = lc
 
 	tg, err := gotgbot.NewBot(cfg.BotToken, botOpts)
 	if err != nil {
@@ -167,6 +168,8 @@ func New(cfg *config.Config, database *db.DB, txt *texts.Loader) (*Bot, error) {
 	for _, a := range cfg.Admins {
 		b.admins[a] = true
 	}
+	// Wired after b exists: a failed send is queued durably instead of lost.
+	lc.onRetryable = b.enqueueFailedSend
 
 	b.Dispatcher = ext.NewDispatcher(&ext.DispatcherOpts{
 		Error: b.onError,
