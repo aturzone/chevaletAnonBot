@@ -66,3 +66,36 @@ func TestErrorPredicates(t *testing.T) {
 		t.Error("isNetworkError should be false for telegram/db/plain errors")
 	}
 }
+
+// TestErrNoSendRightsIsBenign guards the classification that stops one restricted
+// group filling the error channel. Somebody adds the bot to a supergroup where
+// members cannot post; prep allows supergroups, so every message there makes the
+// catch-all try to reply and be refused. Filed as incidents that was one report per
+// message — plus a tracking-code reply that also could not be sent.
+func TestErrNoSendRightsIsBenign(t *testing.T) {
+	err := &gotgbot.TelegramError{
+		Method:      "sendMessage",
+		Code:        400,
+		Description: "Bad Request: not enough rights to send text messages to the chat",
+	}
+	if !errNoSendRights(err) {
+		t.Error("the real production error was not classified as a missing-rights error")
+	}
+	// It must not be mistaken for anything that IS actionable.
+	if errForbidden(err) {
+		t.Error("a 400 was classified as a 403")
+	}
+	if _, isFlood := errTooManyRequests(err); isFlood {
+		t.Error("a rights error was classified as a rate limit")
+	}
+	// Unrelated errors must not match, or real failures would be swallowed.
+	for _, other := range []error{
+		&gotgbot.TelegramError{Code: 400, Description: "Bad Request: message to copy not found"},
+		&gotgbot.TelegramError{Code: 403, Description: "Forbidden: bot was blocked by the user"},
+		&gotgbot.TelegramError{Code: 429, Description: "Too Many Requests: retry after 5"},
+	} {
+		if errNoSendRights(other) {
+			t.Errorf("%v was wrongly classified as a missing-rights error", other)
+		}
+	}
+}

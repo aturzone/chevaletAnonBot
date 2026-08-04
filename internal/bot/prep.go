@@ -129,6 +129,12 @@ func (b *Bot) handleErr(tg *gotgbot.Bot, ctx *ext.Context, err error) error {
 		return nil
 	case errForbidden(err): // covers "bot was blocked by the user" / "not a member"
 		return nil
+	case errNoSendRights(err):
+		// The bot is in a group where it may not post. A permission fact about that
+		// chat, not a bug: logged once at INFO so it is discoverable, never filed as
+		// an incident (which would report every single message in that group).
+		slog.Info("cannot reply in this chat: no send rights", "chat", chatIDOf(ctx))
+		return nil
 	case errors.Is(err, errFloodPaused):
 		// OUR pause, honouring Telegram's. Must NOT call noteFloodWait: recording a
 		// pause because we are already paused is the loop that muted the bot.
@@ -175,6 +181,14 @@ func (b *Bot) handleErr(tg *gotgbot.Bot, ctx *ext.Context, err error) error {
 	default:
 		return err
 	}
+}
+
+// chatIDOf is the chat an update came from, 0 if unknown.
+func chatIDOf(ctx *ext.Context) int64 {
+	if ctx != nil && ctx.EffectiveChat != nil {
+		return ctx.EffectiveChat.Id
+	}
+	return 0
 }
 
 // command registers a private-chat command handler wrapped with prep. Used for

@@ -137,3 +137,18 @@ func isFloodErr(err error) bool {
 	_, ok := errTooManyRequests(err)
 	return ok
 }
+
+// errNoSendRights: "Bad Request: not enough rights to send text messages to the
+// chat" (and the media variants).
+//
+// This is a FACT ABOUT A CHAT, not a fault. prep deliberately allows supergroups
+// (Python parity — the bot answers commands and the catch-all there), so once
+// somebody adds the bot to a group where members are restricted from posting, every
+// message in that group makes the catch-all try to reply and be refused. Treating
+// that as an incident filed one report per message into ERROR_CHAT_ID and tried to
+// reply to the user with a tracking code — a reply that also could not be sent.
+//
+// Same family as errForbidden: nothing to fix, nothing to page anyone about.
+func errNoSendRights(err error) bool {
+	return descContains(err, "not enough rights to send")
+}
