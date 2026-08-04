@@ -106,9 +106,11 @@ func TestFloodWaitPausesEverything(t *testing.T) {
 	if got := l.floodWaitRemaining(); got < 119*time.Second {
 		t.Fatalf("floodWaitRemaining = %v; want ~120s", got)
 	}
-	// Even a chat that has sent nothing is held back.
-	if w := l.reserve(999); w < 119*time.Second {
-		t.Errorf("a fresh chat got wait %v during a flood pause; want ~120s", w)
+	// reserve() reports PACING only, deliberately: folding the pause in here is what
+	// made one pause cascade into a lockup. The pause is enforced by the client, see
+	// TestBackpressureIsNotMistakenForATelegramFlood.
+	if w := l.reserve(999); w != 0 {
+		t.Errorf("reserve() returned %v for an idle chat; it must report pacing only", w)
 	}
 
 	// A LONGER wait extends it; a shorter one must not shorten it.
@@ -202,27 +204,66 @@ func TestSendsArePacedAtTheChannelRate(t *testing.T) {
 	}
 }
 
-// TestFailsFastWhenDebtStacks: with callers already queued — the real shape under
-// load, since background jobs send alongside the dispatcher — the wait grows past
-// the cap, and the call must fail fast rather than park the pipeline.
-func TestFailsFastWhenDebtStacks(t *testing.T) {
-	l, _, _ := newTestLimiter()
+// TestPacingNeverDropsAMessage is the regression test for the outage: back-pressure
+// must DELAY a send, never refuse it. Refusing meant a synthetic 429, which handleErr
+// treated as a Telegram flood, which paused everything, which made every later call
+// refuse too — the loop that muted the bot and stopped users answering.
+func TestPacingNeverDropsAMessage(t *testing.T) {
+	l, _, slept := newTestLimiter()
 	c := &limitedClient{inner: &fakeInner{}, limiter: l}
 	const channel = int64(-1002157529004)
 
-	// Stack debt without letting any time pass, as concurrent callers would.
-	for i := 0; i < 12; i++ {
+	for i := 0; i < 20; i++ { // stack deep debt, as concurrent callers would
 		l.reserve(channel)
 	}
+	if _, err := c.RequestWithContext(context.Background(), "t", "sendMessage",
+		map[string]any{"chat_id": "-1002157529004"}, nil); err != nil {
+		t.Fatalf("a deeply queued send was REFUSED (%v); pacing must delay, not drop", err)
+	}
+	for _, d := range *slept {
+		if d > maxInlineWait {
+			t.Errorf("slept %v, past the %v cap that keeps the dispatcher moving", d, maxInlineWait)
+		}
+	}
+}
 
+// TestBackpressureIsNotMistakenForATelegramFlood pins the distinction that broke
+// production: our own pause must never look like a 429.
+func TestBackpressureIsNotMistakenForATelegramFlood(t *testing.T) {
+	l, _, _ := newTestLimiter()
+	c := &limitedClient{inner: &fakeInner{}, limiter: l}
+
+	l.noteFloodWait(600) // Telegram really has paused us
 	_, err := c.RequestWithContext(context.Background(), "t", "sendMessage",
-		map[string]any{"chat_id": "-1002157529004"}, nil)
+		map[string]any{"chat_id": "12345"}, nil)
 	if err == nil {
-		t.Fatal("a deeply queued send was accepted; it would have parked the dispatcher")
+		t.Fatal("a send went out during a 600s Telegram pause")
+	}
+	if !errors.Is(err, errFloodPaused) {
+		t.Errorf("error = %v; want errFloodPaused", err)
 	}
 	var te *gotgbot.TelegramError
-	if !errors.As(err, &te) || te.Code != 429 {
-		t.Errorf("fail-fast error = %v; want a 429 so handleErr tells the user to retry", err)
+	if errors.As(err, &te) && te.Code == 429 {
+		t.Error("our own pause was reported as a 429 — this is the loop that muted the bot")
+	}
+	if got := l.floodWaitRemaining(); got > 601*time.Second {
+		t.Errorf("the pause grew to %v just from being observed", got)
+	}
+}
+
+// TestFloodPauseDoesNotSelfExtend: hammering a paused limiter must leave the deadline
+// exactly where Telegram put it.
+func TestFloodPauseDoesNotSelfExtend(t *testing.T) {
+	l, _, _ := newTestLimiter()
+	c := &limitedClient{inner: &fakeInner{}, limiter: l}
+	l.noteFloodWait(300)
+	before := l.floodWaitRemaining()
+	for i := 0; i < 25; i++ {
+		_, _ = c.RequestWithContext(context.Background(), "t", "sendMessage",
+			map[string]any{"chat_id": "12345"}, nil)
+	}
+	if after := l.floodWaitRemaining(); after > before {
+		t.Errorf("pause grew from %v to %v by being hit repeatedly; that is the lockup", before, after)
 	}
 }
 
