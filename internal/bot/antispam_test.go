@@ -136,15 +136,24 @@ func TestStaleTargetsAreForgotten(t *testing.T) {
 		t.Fatal("no targets were recorded at all")
 	}
 
-	// Age everything past the window, then make one more call to trigger the sweep.
+	// Age EVERYTHING past the window — the global list as well as the per-target
+	// ones. Ageing only the per-target entries left 50 fresh global timestamps, over
+	// the 40 cap, so the next call was blocked and recorded nothing.
 	shift := int64(sendRateWindow) + int64(time.Second)
+	for i := range u.sendTimes {
+		u.sendTimes[i] -= shift
+	}
 	for tgt, times := range u.perTarget {
 		for i := range times {
 			times[i] -= shift
 		}
 		u.perTarget[tgt] = times
 	}
-	u.allowSendTo("fresh")
+
+	// One more call triggers the sweep and records itself.
+	if allowed, _ := u.allowSendTo("fresh"); !allowed {
+		t.Fatal("a send after the window elapsed was blocked")
+	}
 
 	if len(u.perTarget) != 1 {
 		t.Errorf("perTarget holds %d entries after they all expired; want just the fresh one", len(u.perTarget))
