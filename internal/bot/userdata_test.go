@@ -1,18 +1,20 @@
 package bot
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
 
 func TestAllowSendCap(t *testing.T) {
 	u := &userData{}
+	// Distinct targets, so only the GLOBAL cap can be the thing that blocks.
 	for i := 0; i < sendRateMax; i++ {
-		if !u.allowSend() {
+		if allowed, _ := u.allowSendTo("t" + strconv.Itoa(i)); !allowed {
 			t.Fatalf("send %d/%d should be allowed", i+1, sendRateMax)
 		}
 	}
-	if u.allowSend() {
+	if allowed, _ := u.allowSendTo("tN"); allowed {
 		t.Fatal("send over the cap should be blocked")
 	}
 }
@@ -23,7 +25,7 @@ func TestAllowSendWindowAgesOut(t *testing.T) {
 	for i := 0; i < sendRateMax; i++ {
 		u.sendTimes = append(u.sendTimes, old)
 	}
-	if !u.allowSend() {
+	if allowed, _ := u.allowSendTo("t"); !allowed {
 		t.Fatal("timestamps outside the window should age out; send should be allowed")
 	}
 	if len(u.sendTimes) != 1 {

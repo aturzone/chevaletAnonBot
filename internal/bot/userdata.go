@@ -29,6 +29,18 @@ type userData struct {
 	// Guarded by mu (prep holds it for the whole handler).
 	sendTimes []int64
 
+	// perTarget: recent send times PER RECIPIENT. The global limit above bounds
+	// total output, but the harassment vector on an anonymous bot is one person
+	// flooding ONE victim — 40/min all aimed at the same inbox is still 40 messages
+	// they cannot stop. Keyed by target uid, same nano timestamps, same lifetime as
+	// sendTimes so cancelling cannot reset it.
+	perTarget map[string][]int64
+
+	// lastWarn: when the user was last told to slow down. A flooder tripping the
+	// limit hundreds of times must not get hundreds of replies — each one is an API
+	// call, so warning on every trip turns the anti-spam measure into its own flood.
+	lastWarn int64
+
 	// lastAccess: when this entry was last fetched. The userStore sweep evicts
 	// long-idle entries to bound memory under a large/hostile population.
 	// Guarded by the userStore mutex (set in get, read in sweep).
@@ -42,25 +54,77 @@ type userData struct {
 const (
 	sendRateMax    = 40
 	sendRateWindow = time.Minute
+
+	// perTargetMax bounds messages to ONE recipient in the same window. A human
+	// conversation never needs this many in a minute; a flood aimed at one person
+	// does. This is the limit that actually protects a victim.
+	perTargetMax = 8
+
+	// warnCooldown is how often a rate-limited user is told to slow down. Replying
+	// to every blocked attempt would cost one API call per attempt, which is exactly
+	// the load the limit exists to prevent.
+	warnCooldown = 30 * time.Second
 )
 
-// allowSend reports whether this user may send another anonymous message now
-// (sliding window). The caller holds u.mu (prep does).
-func (u *userData) allowSend() bool {
-	now := time.Now().UnixNano()
-	cutoff := now - int64(sendRateWindow)
-	kept := u.sendTimes[:0]
-	for _, t := range u.sendTimes {
+// prune drops timestamps older than the window and returns what is left.
+func prune(times []int64, cutoff int64) []int64 {
+	kept := times[:0]
+	for _, t := range times {
 		if t >= cutoff {
 			kept = append(kept, t)
 		}
 	}
-	u.sendTimes = kept
-	if len(kept) >= sendRateMax {
-		return false
+	return kept
+}
+
+// allowSendTo reports whether this user may send another anonymous message to
+// target right now, and whether the caller should say so.
+//
+// Two limits, because they catch different abuse:
+//   - the global one bounds total output from this account;
+//   - the per-target one bounds what a single VICTIM can be made to receive, which
+//     is the harassment the anonymity makes possible in the first place.
+//
+// warn is true at most once per warnCooldown. A flooder that trips the limit two
+// hundred times must not receive two hundred replies: each is an API call, and
+// answering every attempt would make the anti-spam measure a flood of its own.
+//
+// The caller holds u.mu (prep does).
+func (u *userData) allowSendTo(target string) (allowed, warn bool) {
+	now := time.Now().UnixNano()
+	cutoff := now - int64(sendRateWindow)
+
+	u.sendTimes = prune(u.sendTimes, cutoff)
+
+	if u.perTarget == nil {
+		u.perTarget = make(map[string][]int64)
 	}
+	// Prune every target, not just this one, so an abandoned conversation cannot
+	// keep its slice alive for the lifetime of the process.
+	for t, times := range u.perTarget {
+		if kept := prune(times, cutoff); len(kept) == 0 {
+			delete(u.perTarget, t)
+		} else {
+			u.perTarget[t] = kept
+		}
+	}
+
+	overGlobal := len(u.sendTimes) >= sendRateMax
+	overTarget := target != "" && len(u.perTarget[target]) >= perTargetMax
+
+	if overGlobal || overTarget {
+		if now-u.lastWarn >= int64(warnCooldown) {
+			u.lastWarn = now
+			return false, true
+		}
+		return false, false
+	}
+
 	u.sendTimes = append(u.sendTimes, now)
-	return true
+	if target != "" {
+		u.perTarget[target] = append(u.perTarget[target], now)
+	}
+	return true, false
 }
 
 // convData holds exactly the keys the Python handlers stored in user_data.
